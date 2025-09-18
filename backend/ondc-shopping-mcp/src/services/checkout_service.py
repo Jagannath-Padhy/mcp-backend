@@ -4,6 +4,8 @@ from typing import Dict, List, Optional, Any, Tuple
 import logging
 import uuid
 import json
+import asyncio
+import time
 
 from ..models.session import Session, CheckoutState, CheckoutStage, DeliveryInfo
 from ..buyer_backend_client import BuyerBackendClient
@@ -46,6 +48,90 @@ class CheckoutService:
         self.product_enrichment = get_product_enrichment_service()
         self.validation = get_biap_validation_service()
         logger.info("CheckoutService initialized with BIAP-compatible services")
+    
+    async def _poll_for_response(
+        self,
+        poll_function,
+        message_id: str,
+        operation_name: str,
+        max_attempts: int = 15,
+        initial_delay: float = 2.0,
+        backoff_factor: float = 1.5,
+        max_delay: float = 10.0,
+        auth_token: Optional[str] = None
+    ) -> Optional[Dict]:
+        """
+        Generic polling mechanism for asynchronous ONDC operations
+        
+        Args:
+            poll_function: The function to call for polling (e.g., get_select_response)
+            message_id: The message ID to poll for
+            operation_name: Name of the operation (for logging)
+            max_attempts: Maximum polling attempts
+            initial_delay: Initial delay between polls in seconds
+            backoff_factor: Factor to increase delay between attempts
+            max_delay: Maximum delay between polls
+            auth_token: Optional auth token for authenticated requests
+            
+        Returns:
+            The completed response or None if timeout/error
+        """
+        logger.info(f"[Polling] Starting {operation_name} polling for messageId: {message_id}")
+        
+        delay = initial_delay
+        attempts = 0
+        
+        while attempts < max_attempts:
+            attempts += 1
+            
+            try:
+                # Call the polling function with message ID
+                logger.debug(f"[Polling] Attempt {attempts}/{max_attempts} for {operation_name}")
+                
+                if auth_token:
+                    response = await poll_function(messageIds=message_id, auth_token=auth_token)
+                else:
+                    response = await poll_function(messageIds=message_id)
+                
+                logger.debug(f"[Polling] Response: {json.dumps(response, indent=2) if response else 'None'}")
+                
+                # Check if response is ready
+                if response:
+                    # Handle different response formats
+                    # Some endpoints return array, some return object
+                    if isinstance(response, list) and len(response) > 0:
+                        response_data = response[0]
+                    else:
+                        response_data = response
+                    
+                    # Check status field
+                    status = response_data.get('status', '').upper()
+                    
+                    if status == 'COMPLETED':
+                        logger.info(f"[Polling]  {operation_name} completed successfully")
+                        return response_data
+                    elif status == 'FAILED':
+                        logger.error(f"[Polling]  {operation_name} failed: {response_data.get('message', 'Unknown error')}")
+                        return None
+                    elif status in ['PROCESSING', 'PENDING', '']:
+                        # Still processing, continue polling
+                        logger.debug(f"[Polling] {operation_name} still processing (status: {status})")
+                    else:
+                        logger.warning(f"[Polling] Unknown status: {status}")
+            
+            except Exception as e:
+                logger.error(f"[Polling] Error during {operation_name} polling attempt {attempts}: {e}")
+            
+            # Wait before next attempt
+            if attempts < max_attempts:
+                logger.debug(f"[Polling] Waiting {delay:.1f} seconds before next attempt")
+                await asyncio.sleep(delay)
+                
+                # Exponential backoff with max delay
+                delay = min(delay * backoff_factor, max_delay)
+        
+        logger.error(f"[Polling]  Timeout: {operation_name} did not complete after {attempts} attempts")
+        return None
     
     async def select_items_for_order(
         self, 
@@ -117,12 +203,12 @@ class CheckoutService:
             city_code = get_city_code_by_pincode(delivery_pincode)
             logger.debug(f"[CheckoutService] City code: {city_code}")
             
-            # Step 4: Create BIAP-compatible context (match Postman collection format)
+            # Step 4: Create BIAP-compatible context (match Himira documentation format)
             logger.info("[CheckoutService] Step 4: Creating BIAP-compatible context...")
             context = self.context_factory.create({
                 'action': 'select',
                 'transaction_id': session.checkout_state.transaction_id,
-                'city': delivery_pincode,  #  CRITICAL: Use pincode like Postman, not city_code
+                'city': delivery_pincode,  #  CRITICAL: Use pincode directly as per Himira docs
                 'pincode': delivery_pincode
             })
             logger.debug(f"[CheckoutService] Context created: {json.dumps(context, indent=2)}")
@@ -153,8 +239,13 @@ class CheckoutService:
                     'hasCustomisations': False       # Required by Postman format
                 }
                 
-                # Add location_id if available
+                # Add product structure for biap backend compatibility
                 if item.location_id:
+                    # CRITICAL FIX: biap backend expects item.product.location_id, not item.location_id
+                    select_item['product'] = {
+                        'location_id': item.location_id
+                    }
+                    # Also keep the direct location_id for backward compatibility
                     select_item['location_id'] = item.location_id
                     location_set.add(item.location_id)
                 
@@ -190,9 +281,11 @@ class CheckoutService:
             # Add provider at cart level if available (for backend transformation)
             if cart_provider:
                 cart_obj['provider'] = cart_provider
+                logger.debug(f"[CheckoutService] Cart provider: {json.dumps(cart_provider, indent=2)}")
             
             # Get GPS coordinates using centralized utility
             gps_coords = get_city_gps(delivery_city)
+            logger.debug(f"[CheckoutService] GPS coordinates for {delivery_city}: {gps_coords}")
             
             #  CRITICAL: Simplify fulfillments to match Postman collection exactly
             fulfillments_obj = [{
@@ -212,24 +305,133 @@ class CheckoutService:
                     'cart': cart_obj,             #  Backend expects 'cart' (confirmed from Postman collection)
                     'fulfillments': fulfillments_obj  #  At message level as backend expects
                 },
-                'userId': session.session_id
+                'userId': session.session_id,
+                'deviceId': getattr(session, 'device_id', config.guest.device_id)
             }
             
             logger.info("[CheckoutService] Step 9: Calling BIAP SELECT API...")
-            logger.debug(f"[CheckoutService] SELECT request payload:\n{json.dumps(select_data, indent=2)}")
+            # Enhanced debug logging for SELECT request
+            logger.info(f"[CheckoutService] SELECT request summary:")
+            logger.info(f"  - Transaction ID: {context.get('transaction_id')}")
+            logger.info(f"  - Items count: {len(select_items)}")
+            logger.info(f"  - Delivery pincode: {delivery_pincode}")
+            logger.info(f"  - Cart provider ID: {cart_provider['id'] if cart_provider else 'None'}")
+            logger.info(f"  - Cart provider locations: {len(cart_provider.get('locations', [])) if cart_provider else 0}")
             
-            # Get auth token from session for authenticated SELECT
+            # CRITICAL VALIDATION: Ensure provider locations match working curl format
+            if cart_provider and 'locations' in cart_provider:
+                logger.info(f"[CheckoutService] Validating provider location structure:")
+                logger.info(f"  Provider ID: {cart_provider.get('id')}")
+                logger.info(f"  Provider local_id: {cart_provider.get('local_id')}")
+                
+                for idx, loc in enumerate(cart_provider['locations']):
+                    logger.info(f"  - Location[{idx}]: {json.dumps(loc)}")
+                    if isinstance(loc, dict):
+                        has_id = 'id' in loc
+                        has_local_id = 'local_id' in loc
+                        logger.info(f"    Has 'id' field: {has_id}")
+                        logger.info(f"    Has 'local_id' field: {has_local_id}")
+                        
+                        # Validate against working curl format
+                        if has_id and has_local_id:
+                            # Verify ONDC format for ID (should contain underscores)
+                            full_id = loc.get('id', '')
+                            local_id = loc.get('local_id', '')
+                            if '_' in full_id and full_id.endswith(local_id):
+                                logger.info(f"    ✅ Location format matches curl: full_id={full_id}, local_id={local_id}")
+                            else:
+                                logger.warning(f"    ⚠️ Location ID format may not match ONDC standard")
+                        else:
+                            # CRITICAL FIX: Ensure both fields are present
+                            if not has_id and has_local_id:
+                                logger.warning(f"[CheckoutService] Location missing 'id' field, using local_id as fallback")
+                                loc['id'] = loc['local_id']
+                            elif not has_id:
+                                logger.error(f"[CheckoutService] Location missing both 'id' and 'local_id' fields!")
+                                # Set default location ID
+                                from ..utils.ondc_constants import HIMIRA_LOCATION_LOCAL_ID
+                                loc['id'] = HIMIRA_LOCATION_LOCAL_ID
+                                logger.info(f"[CheckoutService] Set default location id: {HIMIRA_LOCATION_LOCAL_ID}")
+                                
+                        # Final validation after any fixes
+                        if 'id' in loc and 'local_id' in loc:
+                            logger.info(f"    ✅ Location validation passed: {json.dumps(loc)}")
+                        else:
+                            logger.error(f"    ❌ Location validation failed: missing required fields")
+            else:
+                logger.warning(f"[CheckoutService] No provider locations found in cart_provider: {cart_provider}")
+            
+            logger.debug(f"[CheckoutService] Full SELECT request payload:\n{json.dumps(select_data, indent=2)}")
+            
+            # GUEST MODE: SELECT API call without authentication
             auth_token = getattr(session, 'auth_token', None)
             if not auth_token:
-                logger.warning("[CheckoutService] No auth token found - SELECT may fail if auth is required")
+                logger.info("[CheckoutService] GUEST MODE - Calling SELECT without auth token")
+                # For guest users, we'll use wil-api-key authentication only
+                auth_token = None
             else:
                 logger.info("[CheckoutService] Using auth token for SELECT request")
             
-            # Call BIAP SELECT API with auth token
-            result = await self.buyer_app.select_items(select_data, auth_token=auth_token)
+            # Call BIAP SELECT API (works with or without auth token for guest)
+            # FIXED: Send as array format as expected by backend selectMultipleOrder
+            select_response = await self.buyer_app.select_items([select_data], auth_token=auth_token)
             
-            logger.info(f"[CheckoutService] SELECT API response received")
-            logger.debug(f"[CheckoutService] SELECT response: {json.dumps(result, indent=2) if result else 'None'}")
+            logger.info(f"[CheckoutService] SELECT API initial response received")
+            logger.debug(f"[CheckoutService] SELECT initial response: {json.dumps(select_response, indent=2) if select_response else 'None'}")
+            
+            # Extract message ID from response for polling
+            # FIXED: For array responses, extract messageId from first item's context
+            # Matches frontend pattern: data?.map((txn) => txn.context?.message_id)
+            message_id = None
+            if select_response:
+                if isinstance(select_response, list) and len(select_response) > 0:
+                    # Expected successful array response format
+                    first_item = select_response[0]
+                    if isinstance(first_item, dict):
+                        context = first_item.get('context', {})
+                        if isinstance(context, dict):
+                            message_id = context.get('message_id')
+                            logger.info(f"[CheckoutService] Extracted messageId from array response: {message_id}")
+                elif isinstance(select_response, dict):
+                    # Fallback for single object responses (backwards compatibility)
+                    context = select_response.get('context', {})
+                    if isinstance(context, dict):
+                        message_id = context.get('message_id')
+                        logger.info(f"[CheckoutService] Extracted messageId from dict response: {message_id}")
+                        
+            # Log response structure for debugging if no messageId found
+            if not message_id:
+                logger.error(f"[CheckoutService] No messageId found in response structure:")
+                logger.error(f"  Response type: {type(select_response)}")
+                if isinstance(select_response, list):
+                    logger.error(f"  Array length: {len(select_response)}")
+                    if len(select_response) > 0:
+                        logger.error(f"  First item type: {type(select_response[0])}")
+                        if isinstance(select_response[0], dict):
+                            logger.error(f"  First item keys: {list(select_response[0].keys())}")
+                elif isinstance(select_response, dict):
+                    logger.error(f"  Dict keys: {list(select_response.keys())}")
+            
+            if not message_id:
+                logger.error(f"[CheckoutService] No messageId in SELECT response: {select_response}")
+                return {
+                    'success': False,
+                    'message': ' Failed to initiate SELECT request. No message ID received.'
+                }
+            
+            logger.info(f"[CheckoutService] Polling for SELECT response with messageId: {message_id}")
+            
+            # Poll for the actual SELECT response
+            result = await self._poll_for_response(
+                poll_function=self.buyer_app.get_select_response,
+                message_id=message_id,
+                operation_name="SELECT",
+                max_attempts=15,
+                initial_delay=2.0,
+                auth_token=auth_token
+            )
+            
+            logger.debug(f"[CheckoutService] Final SELECT response after polling: {json.dumps(result, indent=2) if result else 'None'}")
             
             if result and result.get('success', True) and 'error' not in result:
                 # Update session to SELECT stage
@@ -467,17 +669,47 @@ class CheckoutService:
                 'userId': session.session_id
             }
             
-            # Step 12: Call BIAP INIT API - Authentication Required
-            # Get auth token from session - mandatory for order operations
+            # Step 12: Call BIAP INIT API - GUEST MODE
+            # Guest mode: No authentication required for order initialization
             auth_token = getattr(session, 'auth_token', None)
             if not auth_token:
-                logger.error("[CheckoutService] Missing auth token - authentication required for order initialization")
+                logger.info("[CheckoutService] GUEST MODE - Proceeding without auth token")
+                # For guest users, we'll use wil-api-key authentication only
+                auth_token = None
+            
+            init_response = await self.buyer_app.initialize_order(init_data, auth_token=auth_token)
+            
+            logger.info(f"[CheckoutService] INIT API initial response received")
+            logger.debug(f"[CheckoutService] INIT initial response: {json.dumps(init_response, indent=2) if init_response else 'None'}")
+            
+            # Extract message ID from response for polling
+            message_id = None
+            if init_response:
+                if isinstance(init_response, dict):
+                    message_id = init_response.get('messageId') or init_response.get('message_id')
+                elif isinstance(init_response, list) and len(init_response) > 0:
+                    message_id = init_response[0].get('messageId') or init_response[0].get('message_id')
+            
+            if not message_id:
+                logger.error(f"[CheckoutService] No messageId in INIT response: {init_response}")
                 return {
                     'success': False,
-                    'message': ' Authentication required. Please login first using phone_login tool.'
+                    'message': ' Failed to initiate order initialization. No message ID received.'
                 }
             
-            result = await self.buyer_app.initialize_order(init_data, auth_token=auth_token)
+            logger.info(f"[CheckoutService] Polling for INIT response with messageId: {message_id}")
+            
+            # Poll for the actual INIT response
+            result = await self._poll_for_response(
+                poll_function=self.buyer_app.get_init_response,
+                message_id=message_id,
+                operation_name="INIT",
+                max_attempts=15,
+                initial_delay=2.0,
+                auth_token=auth_token
+            )
+            
+            logger.debug(f"[CheckoutService] Final INIT response after polling: {json.dumps(result, indent=2) if result else 'None'}")
             
             if result and result.get('success', True) and 'error' not in result:
                 # Update session to INIT stage  
@@ -773,17 +1005,64 @@ class CheckoutService:
                 'userId': session.session_id
             }
             
-            # Step 9: Call BIAP CONFIRM API - Authentication Required
-            # Get auth token from session - mandatory for order confirmation
+            # Step 9: Call BIAP CONFIRM API - MOCK MODE FOR GUEST
+            # Guest mode: Allow mock confirmation without authentication
             auth_token = getattr(session, 'auth_token', None)
             if not auth_token:
-                logger.error("[CheckoutService] Missing auth token - authentication required for order confirmation")
-                return {
-                    'success': False,
-                    'message': ' Authentication required. Please login first using phone_login tool.'
-                }
+                if config.payment.mock_mode:
+                    logger.info("[CheckoutService] MOCK MODE - Confirming order without auth token")
+                    # For mock mode, we'll simulate the confirmation
+                    auth_token = None
+                else:
+                    logger.error("[CheckoutService] Real mode requires authentication for order confirmation")
+                    return {
+                        'success': False,
+                        'message': ' Authentication required for real orders. Please login first.'
+                    }
             
-            result = await self.buyer_app.confirm_order(confirm_data, auth_token=auth_token)
+            # In mock mode, simulate the confirmation
+            if config.payment.mock_mode and not auth_token:
+                logger.info("[CheckoutService] MOCK CONFIRM - Simulating order confirmation")
+                # Create mock confirmation response
+                result = {
+                    'success': True,
+                    'order_id': f"MOCK_ORDER_{session.checkout_state.transaction_id[:8].upper()}",
+                    'message': '[MOCK] Order confirmed successfully'
+                }
+            else:
+                confirm_response = await self.buyer_app.confirm_order(confirm_data, auth_token=auth_token)
+                
+                logger.info(f"[CheckoutService] CONFIRM API initial response received")
+                logger.debug(f"[CheckoutService] CONFIRM initial response: {json.dumps(confirm_response, indent=2) if confirm_response else 'None'}")
+                
+                # Extract message ID from response for polling
+                message_id = None
+                if confirm_response:
+                    if isinstance(confirm_response, dict):
+                        message_id = confirm_response.get('messageId') or confirm_response.get('message_id')
+                    elif isinstance(confirm_response, list) and len(confirm_response) > 0:
+                        message_id = confirm_response[0].get('messageId') or confirm_response[0].get('message_id')
+                
+                if not message_id:
+                    logger.error(f"[CheckoutService] No messageId in CONFIRM response: {confirm_response}")
+                    return {
+                        'success': False,
+                        'message': ' Failed to confirm order. No message ID received.'
+                    }
+                
+                logger.info(f"[CheckoutService] Polling for CONFIRM response with messageId: {message_id}")
+                
+                # Poll for the actual CONFIRM response
+                result = await self._poll_for_response(
+                    poll_function=self.buyer_app.get_confirm_response,
+                    message_id=message_id,
+                    operation_name="CONFIRM",
+                    max_attempts=15,
+                    initial_delay=2.0,
+                    auth_token=auth_token
+                )
+                
+                logger.debug(f"[CheckoutService] Final CONFIRM response after polling: {json.dumps(result, indent=2) if result else 'None'}")
             
             if result and result.get('success', True) and 'error' not in result:
                 # Extract order ID from response

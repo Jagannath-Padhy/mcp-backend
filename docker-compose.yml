@@ -37,6 +37,9 @@ services:
       # MCP Transport settings
       - MCP_TRANSPORT=stdio
       - PYTHONUNBUFFERED=1
+      # Guest User Configuration
+      - GUEST_USER_ID=guestUser
+      - GUEST_DEVICE_ID=d58dc5e2119ae5430b9321602618c878
     volumes:
       - ./data/sessions:/app/sessions
       - ./backend/api/config:/app/api/config:ro

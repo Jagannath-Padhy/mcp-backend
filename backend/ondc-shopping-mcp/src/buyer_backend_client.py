@@ -129,14 +129,13 @@ class BuyerBackendClient:
                 logger.debug(f"{method.upper()} {url} -> {response.status_code}")
                 
                 # Log response in debug mode
-                if self.debug_curl:
+                if self.debug_curl or endpoint == "/v2/select":
                     logger.info(f"[CURL RESPONSE] Status: {response.status_code}")
-                    if response.status_code != 200:
-                        try:
-                            response_json = response.json()
-                            logger.error(f"[CURL RESPONSE] Body:\n{json.dumps(response_json, indent=2)}")
-                        except:
-                            logger.error(f"[CURL RESPONSE] Body:\n{response.text[:1000]}")  # Limit size
+                    try:
+                        response_json = response.json()
+                        logger.info(f"[CURL RESPONSE] Body:\n{json.dumps(response_json, indent=2)}")
+                    except:
+                        logger.info(f"[CURL RESPONSE] Body:\n{response.text[:1000]}")  # Limit size
                 
                 if response.status_code == 200:
                     try:
@@ -352,20 +351,20 @@ class BuyerBackendClient:
         return await self._make_request("POST", "/v2/initialize_order", 
                                       json_data=init_data, auth_token=auth_token, require_auth=False)
     
-    async def get_init_response(self, auth_token: str, **params) -> Optional[Dict]:
+    async def get_init_response(self, auth_token: Optional[str] = None, **params) -> Optional[Dict]:
         """Get init response"""
         return await self._make_request("GET", "/v2/on_initialize_order", 
-                                      params=params, auth_token=auth_token, require_auth=True)
+                                      params=params, auth_token=auth_token, require_auth=False)
     
     async def confirm_order(self, confirm_data: Dict, auth_token: Optional[str] = None) -> Optional[Dict]:
         """ONDC Confirm: Confirm order"""
         return await self._make_request("POST", "/v2/confirm_order", 
                                       json_data=confirm_data, auth_token=auth_token, require_auth=False)
     
-    async def get_confirm_response(self, auth_token: str, **params) -> Optional[Dict]:
+    async def get_confirm_response(self, auth_token: Optional[str] = None, **params) -> Optional[Dict]:
         """Get confirm response"""
         return await self._make_request("GET", "/v2/on_confirm_order", 
-                                      params=params, auth_token=auth_token, require_auth=True)
+                                      params=params, auth_token=auth_token, require_auth=False)
     
     # ================================
     # ORDER MANAGEMENT APIs
@@ -404,10 +403,10 @@ class BuyerBackendClient:
     # PAYMENT APIs
     # ================================
     
-    async def create_razorpay_order(self, order_data: Dict, auth_token: str) -> Optional[Dict]:
+    async def create_razorpay_order(self, order_data: Dict, auth_token: Optional[str] = None) -> Optional[Dict]:
         """Create RazorPay order"""
         return await self._make_request("POST", "/v2/razorpay/createOrder", 
-                                      json_data=order_data, auth_token=auth_token, require_auth=True)
+                                      json_data=order_data, auth_token=auth_token, require_auth=False)
     
     async def create_razorpay_payment(self, order_id: str, payment_data: Dict, auth_token: str) -> Optional[Dict]:
         """Create RazorPay payment"""

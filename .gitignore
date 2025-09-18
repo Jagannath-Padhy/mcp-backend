@@ -3,6 +3,19 @@
 .env.local
 *.env
 
+# Reference implementations (keep locally, don't commit)
+biap-client-node-js/
+himira-nextjs-frontend-main/
+
+# Documentation (keep locally, don't commit)
+*.md
+!README.md
+*.postman_collection.json
+
+# Test files
+test_*.py
+debug_*.py
+*_test.py
 # Data directories
 data/
 logs/
@@ -12,11 +25,6 @@ backend/logs/
 # Configuration (generated at runtime)
 backend/mcp_agent.config.yaml
 mcp_agent.config.yaml
-
-# Claude-specific files
-CLAUDE.md
-claude.md
-*.claude
 
 # Python
 __pycache__/

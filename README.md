@@ -1,267 +1,531 @@
-# ONDC MCP Backend
+# ONDC Shopping MCP Backend
 
-🚀 Production-ready backend for ONDC shopping with AI-powered assistance using MCP (Model Context Protocol) and Google Gemini.
+🛍️ Production-ready ONDC shopping backend with Model Context Protocol (MCP) integration for AI-powered conversational commerce.
 
-## Architecture
+## 🏗️ Architecture Overview
 
-This backend provides a unified solution combining:
-- **MCP-Agent API Server**: REST API endpoints for frontend applications
-- **MCP Server**: STDIO-based server with ONDC shopping tools
-- **MongoDB**: Document storage for sessions, orders, and products
-- **Qdrant**: Vector database for semantic product search
-- **ETL Pipeline**: Data initialization and indexing
+This backend implements a complete ONDC (Open Network for Digital Commerce) shopping solution with AI assistance capabilities through MCP tools. It enables conversational shopping experiences where users can search, browse, add to cart, and complete purchases through natural language interactions.
 
-### Key Design Decisions
+### Key Components
 
-1. **Single Container Architecture**: The MCP-Agent and MCP Server run in the same container using `supervisord` because they communicate via STDIO transport.
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Frontend Application                      │
+│                  (Web/Mobile/Chat Interface)                 │
+└─────────────────┬───────────────────────────────────────────┘
+                  │ HTTP/REST API
+┌─────────────────▼───────────────────────────────────────────┐
+│                    MCP Backend (Port 8001)                   │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │               MCP Server (STDIO Transport)            │  │
+│  │                    40+ Shopping Tools                 │  │
+│  └──────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │                 Himira BIAP Backend                   │  │
+│  │              (ONDC Protocol Implementation)           │  │
+│  └──────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
+                  │
+┌─────────────────▼───────────────────────────────────────────┐
+│                         ONDC Network                         │
+│                    (Sellers, Logistics, etc.)                │
+└─────────────────────────────────────────────────────────────┘
+```
 
-2. **Hybrid Search**: Combines MongoDB text search with Qdrant vector similarity for comprehensive product discovery.
+### Core Services
 
-3. **Session Management**: Persistent session storage in MongoDB with 24-hour TTL.
+- **MCP Server**: Provides 40+ shopping tools via STDIO protocol for AI agents
+- **Guest Authentication**: Device-based authentication for seamless guest checkout
+- **Session Management**: Persistent sessions with auth token management
+- **ONDC Protocol**: Full implementation of SELECT, INIT, CONFIRM with async polling
+- **Vector Search**: Semantic product search using Qdrant (optional)
+- **Cart Management**: Comprehensive cart operations with persistence
 
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
 
 - Docker and Docker Compose
-- Google Gemini API key
-- (Optional) ONDC Backend API credentials
+- WIL API Key (for Himira backend access)
+- (Optional) Gemini API key for vector search
 
-### Setup
+### Installation
 
-1. Clone the repository:
+1. **Clone and setup**:
 ```bash
+git clone <repository>
 cd mcp-backend
-```
-
-2. Configure environment:
-```bash
 cp .env.example .env
-# Edit .env with your API keys
 ```
 
-3. Start services:
+2. **Configure environment** (.env):
+```env
+# Required: Himira Backend Access
+WIL_API_KEY=your_api_key_here
+BACKEND_ENDPOINT=https://hp-buyer-backend-preprod.himira.co.in
+
+# Guest User Configuration
+GUEST_USER_ID=guestUser
+GUEST_DEVICE_ID=d58dc5e2119ae5430b9321602618c878
+
+# Optional: Vector Search
+GEMINI_API_KEY=your_gemini_key_here
+VECTOR_SEARCH_ENABLED=false
+```
+
+3. **Start services**:
 ```bash
 make up        # Start all services
-make init      # Initialize sample data
-make test      # Test API endpoints
+make logs      # View logs
+make status    # Check health
 ```
 
-## API Endpoints
+## 📚 API Documentation
 
-### Health Check
+### Base URL
+```
+http://localhost:8001
+```
+
+### Authentication Flow
+
+The system uses guest authentication with device-based tokens:
+
+1. **Initialize Shopping Session**:
 ```bash
-GET /health
+curl -X POST http://localhost:8001/api/v1/initialize_shopping \
+  -H "Content-Type: application/json" \
+  -d '{}'
 ```
+
+Response:
+```json
+{
+  "success": true,
+  "session_id": "session_2b209e24bbea4359",
+  "auth_token": "eyJhbGciOiJIUzI1NiIs...",
+  "device_id": "d58dc5e2119ae5430b9321602618c878",
+  "message": "Guest session ready with authentication"
+}
+```
+
+### Core Shopping APIs
+
+#### 1. Search Products
+```bash
+curl -X POST http://localhost:8001/api/v1/search_products \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "organic rice",
+    "session_id": "session_2b209e24bbea4359",
+    "limit": 10
+  }'
+```
+
+#### 2. Add to Cart
+```bash
+curl -X POST http://localhost:8001/api/v1/add_to_cart \
+  -H "Content-Type: application/json" \
+  -d '{
+    "item_id": "ab0afa97-ee02-4e22-b446-b826507b2223",
+    "quantity": 2,
+    "session_id": "session_2b209e24bbea4359"
+  }'
+```
+
+#### 3. View Cart
+```bash
+curl -X POST http://localhost:8001/api/v1/view_cart \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "session_2b209e24bbea4359"
+  }'
+```
+
+#### 4. Checkout (SELECT - Get Delivery Quotes)
+```bash
+curl -X POST http://localhost:8001/api/v1/select_items_for_order \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "session_2b209e24bbea4359",
+    "delivery_city": "Bangalore",
+    "delivery_state": "Karnataka",
+    "delivery_pincode": "560001"
+  }'
+```
+
+#### 5. Initialize Order
+```bash
+curl -X POST http://localhost:8001/api/v1/initialize_order \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "session_2b209e24bbea4359",
+    "customer_name": "John Doe",
+    "delivery_address": "123 Main St, Koramangala",
+    "phone": "9999999999",
+    "email": "john@example.com",
+    "payment_method": "razorpay"
+  }'
+```
+
+#### 6. Confirm Order
+```bash
+curl -X POST http://localhost:8001/api/v1/confirm_order \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "session_2b209e24bbea4359",
+    "payment_status": "PAID"
+  }'
+```
+
+## 🛠️ MCP Tools Available
+
+The MCP server provides 40+ tools for comprehensive shopping operations:
 
 ### Session Management
-```bash
-# Create session
-POST /api/v1/sessions
-{
-  "device_id": "optional-device-id",
-  "metadata": {}
-}
+- `initialize_shopping` - Create guest session with authentication
+- `get_session_info` - Get current session state
 
-# Get session
-GET /api/v1/sessions/{session_id}
+### Product Discovery
+- `search_products` - Text and semantic search
+- `advanced_search` - Multi-criteria filtering
+- `browse_categories` - Category navigation
 
-# Delete session
-DELETE /api/v1/sessions/{session_id}
+### Cart Operations
+- `add_to_cart` - Add items to cart
+- `view_cart` - View cart contents
+- `update_cart_quantity` - Modify quantities
+- `remove_from_cart` - Remove items
+- `clear_cart` - Empty cart
+- `get_cart_total` - Calculate totals
+
+### ONDC Checkout Flow
+- `select_items_for_order` - Get delivery quotes (ONDC SELECT)
+- `initialize_order` - Set billing/shipping (ONDC INIT)
+- `confirm_order` - Complete purchase (ONDC CONFIRM)
+
+### Order Management
+- `get_order_status` - Track order status
+- `track_order` - Detailed tracking
+- `initiate_payment` - Payment processing
+- `confirm_order_simple` - Alternative confirmation
+
+### User Features
+- `get_delivery_addresses` - Saved addresses
+- `add_delivery_address` - Add new address
+- `update_delivery_address` - Update address
+- `delete_delivery_address` - Remove address
+- `get_active_offers` - Available offers
+- `apply_offer` - Apply discount
+- `get_user_profile` - Profile information
+- `update_user_profile` - Update profile
+
+## 🔄 ONDC Journey Flow
+
+The system implements the complete ONDC protocol flow:
+
+```
+1. SEARCH → 2. SELECT → 3. INIT → 4. PAYMENT → 5. CONFIRM → 6. TRACK
+     ↓          ↓         ↓          ↓            ↓           ↓
+   Find      Delivery   Order    Process      Complete    Monitor
+  Products    Quote     Setup     Payment       Order       Status
 ```
 
-### Chat Interface
-```bash
-POST /api/v1/chat
-{
-  "message": "I want to buy organic rice",
-  "session_id": "optional-session-id",
-  "device_id": "optional-device-id"
-}
+### Asynchronous Operations
+
+SELECT, INIT, and CONFIRM operations use async polling:
+
+1. **Request**: Send action request (e.g., SELECT)
+2. **Response**: Receive messageId immediately
+3. **Poll**: Check for on_action response (e.g., on_select)
+4. **Result**: Get final response after 2-10 seconds
+
+## 🏗️ Frontend Integration Guide
+
+### Session Management
+
+1. **Initialize on app start**:
+```javascript
+const initSession = async () => {
+  const response = await fetch('/api/v1/initialize_shopping', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({})
+  });
+  const data = await response.json();
+  
+  // Store session_id for all subsequent calls
+  localStorage.setItem('session_id', data.session_id);
+  localStorage.setItem('auth_token', data.auth_token);
+  
+  return data;
+};
 ```
 
-### Product Search
-```bash
-POST /api/v1/search
-{
-  "query": "organic vegetables",
-  "filters": {
-    "category": "Groceries",
-    "price_max": 500
-  },
-  "limit": 20
-}
+2. **Use session in all requests**:
+```javascript
+const searchProducts = async (query) => {
+  const session_id = localStorage.getItem('session_id');
+  
+  const response = await fetch('/api/v1/search_products', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      query: query,
+      session_id: session_id
+    })
+  });
+  
+  return response.json();
+};
 ```
 
-### Cart Management
-```bash
-POST /api/v1/cart/{device_id}
-{
-  "action": "add",  # add, remove, update, view
-  "item": {
-    "product_id": "prod_123",
-    "name": "Organic Rice",
-    "price": 250
-  },
-  "quantity": 2
-}
+### Cart Management Pattern
+
+```javascript
+// Add to cart
+const addToCart = async (product, quantity = 1) => {
+  const session_id = localStorage.getItem('session_id');
+  
+  const response = await fetch('/api/v1/add_to_cart', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      item: product,  // Pass entire product object from search
+      quantity: quantity,
+      session_id: session_id
+    })
+  });
+  
+  return response.json();
+};
+
+// View cart
+const viewCart = async () => {
+  const session_id = localStorage.getItem('session_id');
+  
+  const response = await fetch('/api/v1/view_cart', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      session_id: session_id
+    })
+  });
+  
+  return response.json();
+};
 ```
 
-## MCP Tools Available
+### Checkout Flow
 
-The MCP Server provides these tools to the AI agent:
-
-- `start_session`: Initialize shopping session
-- `get_session`: Retrieve session information
-- `search_products`: Hybrid search with MongoDB + Qdrant
-- `add_to_cart`: Add products to cart
-- `view_cart`: View cart contents
-- `remove_from_cart`: Remove items from cart
-- `checkout`: Process order checkout
-- `get_order_status`: Track order status
-
-## Development
-
-### Useful Commands
-
-```bash
-# View logs
-make logs              # All services
-make logs-backend      # Backend only
-make logs-mongodb      # MongoDB only
-make logs-qdrant       # Qdrant only
-
-# Service management
-make restart           # Restart all services
-make down              # Stop all services
-make rebuild           # Rebuild and restart
-make clean             # Remove all data
-
-# Debugging
-make shell-backend     # Shell into backend container
-make shell-mongodb     # MongoDB shell
-make status            # Check service status
+```javascript
+// Complete checkout flow
+const checkout = async (deliveryInfo, customerInfo) => {
+  const session_id = localStorage.getItem('session_id');
+  
+  // Step 1: Get delivery quotes
+  const selectResponse = await fetch('/api/v1/select_items_for_order', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      session_id: session_id,
+      delivery_city: deliveryInfo.city,
+      delivery_state: deliveryInfo.state,
+      delivery_pincode: deliveryInfo.pincode
+    })
+  });
+  
+  if (!selectResponse.ok) {
+    throw new Error('Failed to get delivery quotes');
+  }
+  
+  // Step 2: Initialize order
+  const initResponse = await fetch('/api/v1/initialize_order', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      session_id: session_id,
+      customer_name: customerInfo.name,
+      delivery_address: customerInfo.address,
+      phone: customerInfo.phone,
+      email: customerInfo.email,
+      payment_method: 'razorpay'
+    })
+  });
+  
+  if (!initResponse.ok) {
+    throw new Error('Failed to initialize order');
+  }
+  
+  // Step 3: Process payment (implement Razorpay/payment gateway)
+  const paymentStatus = await processPayment();
+  
+  // Step 4: Confirm order
+  const confirmResponse = await fetch('/api/v1/confirm_order', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      session_id: session_id,
+      payment_status: paymentStatus
+    })
+  });
+  
+  return confirmResponse.json();
+};
 ```
 
-### Project Structure
+## 📁 Project Structure
 
 ```
 mcp-backend/
 ├── backend/
+│   ├── ondc-shopping-mcp/
+│   │   ├── src/
+│   │   │   ├── adapters/          # MCP tool implementations
+│   │   │   ├── services/          # Business logic
+│   │   │   ├── models/            # Data models
+│   │   │   ├── utils/             # Utilities
+│   │   │   ├── buyer_backend_client.py  # Himira API client
+│   │   │   ├── mcp_server.py      # Main MCP server
+│   │   │   └── config.py          # Configuration
+│   │   └── requirements.txt
 │   ├── api/
-│   │   └── server.py          # FastAPI server with MCP-Agent
-│   ├── mcp_server/
-│   │   └── run_server.py      # MCP Server with ONDC tools
+│   │   └── server.py              # REST API server
 │   ├── Dockerfile
-│   ├── requirements.txt
-│   ├── supervisord.conf      # Process management
-│   └── start.sh
+│   └── supervisord.conf           # Process management
 ├── etl/
-│   ├── etl_pipeline.py        # Data initialization
-│   ├── Dockerfile
-│   └── requirements.txt
+│   └── etl_pipeline.py            # Data initialization
 ├── docker-compose.yml
 ├── Makefile
 ├── .env.example
 └── README.md
 ```
 
-## Environment Variables
+## 🔧 Development
+
+### Local Development
 
 ```bash
-# AI Configuration (Required)
-GEMINI_API_KEY=your-gemini-api-key
-GOOGLE_API_KEY=same-as-gemini-key
+# Install dependencies
+cd backend/ondc-shopping-mcp
+pip install -r requirements.txt
 
-# Backend Integration (Optional)
-BACKEND_ENDPOINT=https://your-ondc-backend.com
-WIL_API_KEY=your-backend-api-key
+# Run MCP server
+python src/mcp_server.py
+
+# Run API server
+cd ../api
+python server.py
+```
+
+### Docker Commands
+
+```bash
+make up          # Start all services
+make down        # Stop all services
+make restart     # Restart services
+make logs        # View logs
+make shell-backend  # Shell into backend
+make status      # Check service health
+```
+
+### Environment Variables
+
+```env
+# Backend Configuration (Required)
+BACKEND_ENDPOINT=https://hp-buyer-backend-preprod.himira.co.in
+WIL_API_KEY=your_api_key_here
+
+# Guest Configuration
+GUEST_USER_ID=guestUser
+GUEST_DEVICE_ID=d58dc5e2119ae5430b9321602618c878
 
 # Database Configuration
-MONGODB_URI=mongodb://admin:admin123@mongodb:27017/ondc_shopping?authSource=admin
 QDRANT_HOST=qdrant
 QDRANT_PORT=6333
+QDRANT_COLLECTION=himira_products
 
-# Feature Flags
-HYBRID_SEARCH_ENABLED=true
-VECTOR_SEARCH_ENABLED=true
+# Optional Features
+VECTOR_SEARCH_ENABLED=false
+GEMINI_API_KEY=your_key_here
 
-# API Settings
-CORS_ORIGINS=*
-RATE_LIMIT_PER_MIN=20
-SESSION_TTL_HOURS=24
+# Session Configuration
+SESSION_TIMEOUT_MINUTES=30
+SESSION_STORE=file
+SESSION_STORE_PATH=~/.ondc-mcp/sessions
+
+# Logging
 LOG_LEVEL=INFO
+LOG_FILE=/app/logs/mcp_operations.log
 ```
 
-## Testing
-
-### Manual Testing
-
-```bash
-# Test complete flow
-make test
-
-# Custom test
-curl -X POST http://localhost:8001/api/v1/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "Show me organic products under 200 rupees",
-    "session_id": "test-session-123"
-  }'
-```
-
-### Postman Collection
-
-Import the included Postman collection for comprehensive API testing:
-- Session management flows
-- Product search scenarios
-- Cart operations
-- Order processing
-
-## Troubleshooting
+## 🐛 Troubleshooting
 
 ### Common Issues
 
-1. **Services not starting**: Check logs with `make logs`
-2. **Connection refused**: Ensure all services are healthy with `make status`
-3. **MCP tools not responding**: Check STDIO connection in supervisor logs
-4. **Search not working**: Verify Qdrant is running and ETL has completed
+1. **Authentication Errors (404s)**:
+   - Ensure WIL_API_KEY is set correctly
+   - Check guest device ID configuration
+   - Verify session has auth token
+
+2. **Cart Empty After Adding Items**:
+   - Check session persistence
+   - Ensure same session_id is used across calls
+   - Verify session storage path is writable
+
+3. **SELECT API Timeouts**:
+   - Backend may be slow, increase timeout
+   - Check network connectivity
+   - Verify product enrichment APIs are accessible
+
+4. **Vector Search Not Working**:
+   - Run ETL pipeline: `make init`
+   - Check Qdrant is running: `docker ps`
+   - Verify GEMINI_API_KEY is valid
 
 ### Debug Mode
 
-Enable debug logging:
+Enable detailed logging:
 ```bash
 LOG_LEVEL=DEBUG docker-compose up
 ```
 
-## Production Deployment
+View backend logs:
+```bash
+docker logs mcp-backend -f
+```
+
+## 🚀 Production Deployment
 
 ### Recommendations
 
-1. **Session Storage**: Replace in-memory sessions with Redis
-2. **Database Security**: Use strong passwords and network isolation
-3. **API Gateway**: Add nginx or similar for load balancing
-4. **Monitoring**: Integrate Prometheus/Grafana for metrics
-5. **Backup**: Regular MongoDB and Qdrant backups
+1. **Security**:
+   - Use HTTPS with TLS certificates
+   - Implement rate limiting
+   - Add API authentication
+   - Secure database credentials
 
-### Scaling
+2. **Scaling**:
+   - Use Redis for session storage
+   - Implement load balancing
+   - Add caching layer
+   - Use connection pooling
 
-- The API server can be horizontally scaled
-- MongoDB and Qdrant support replication
-- Use external session storage for stateless API servers
+3. **Monitoring**:
+   - Add health check endpoints
+   - Implement logging aggregation
+   - Set up alerting
+   - Track API metrics
 
-## Contributing
+4. **Backup**:
+   - Regular database backups
+   - Session state persistence
+   - Configuration management
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## License
+## 📝 License
 
 MIT
 
-## Support
+## 🤝 Support
 
-For issues or questions, please open a GitHub issue.
+For issues or questions, please open a GitHub issue or contact the development team.

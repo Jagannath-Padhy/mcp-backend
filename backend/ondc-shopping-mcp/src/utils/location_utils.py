@@ -53,14 +53,15 @@ def transform_provider_locations(
             transformed.append({'id': local_id})
             
         elif format_type == "full_id_object":
-            # Object with full ONDC location ID
+            # Object with full ONDC location ID AND local_id (required by Himira backend)
             if isinstance(loc, dict):
                 local_id = loc.get('local_id', loc.get('id', ''))
                 full_id = loc.get('id') if '_' in loc.get('id', '') else create_full_location_id(local_id)
             else:
                 local_id = str(loc)
                 full_id = create_full_location_id(local_id)
-            transformed.append({'id': full_id})
+            # Include both id and local_id as per Himira SELECT API requirements
+            transformed.append({'id': full_id, 'local_id': local_id})
             
         else:  # "full_object" (default)
             # Full object with both id and local_id

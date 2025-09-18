@@ -35,71 +35,72 @@ async def initialize_shopping(session_id: Optional[str] = None, **kwargs) -> Dic
         global _LAST_SESSION
         _LAST_SESSION = None
         
-        # Set guest mode explicitly
+        # Get guest configuration from config
+        from ..config import Config
+        config = Config()
+        
+        # Set guest mode explicitly using configured values
         session_obj.user_authenticated = False
         session_obj.demo_mode = False
-        session_obj.user_id = "guestUser"
+        session_obj.user_id = config.guest.user_id
         
-        # Check if deviceId is provided
-        device_id = kwargs.get('deviceId') or kwargs.get('device_id')
+        # Use configured device ID or allow override from kwargs
+        device_id = kwargs.get('deviceId') or kwargs.get('device_id') or config.guest.device_id
         
-        if not device_id:
-            logger.info(f"Created guest session {session_obj.session_id[:8]}... - requesting deviceId")
+        # Always use the configured device ID for consistent guest journey
+        session_obj.device_id = device_id
+        logger.info(f"Initialized guest session {session_obj.session_id[:8]}... with configured deviceId: {device_id}")
+        
+        # Perform guest login to get auth token for API authentication
+        try:
+            from ..buyer_backend_client import BuyerBackendClient
+            buyer_app = BuyerBackendClient()
+            login_data = {"deviceId": device_id}
             
-            welcome_message = (
-                "🛒 **Welcome to ONDC Shopping - Guest Mode!**\n\n"
-                "Shop as a guest with full order placement capabilities!\n\n"
-                "**To continue, I need your device ID:**\n"
-                "• This helps track your cart and orders\n"
-                "• Use any unique identifier (e.g., 'mobile123', 'laptop456')\n\n"
-                "**Call this tool again with deviceId:**\n"
-                "`initialize_shopping deviceId='your_device_id'`\n\n"
-                "**Example:** `initialize_shopping deviceId='mobile123'`\n\n"
-                "🎯 **What you can do:**\n"
-                "• Search products\n• Add to cart\n• Place orders\n• Track deliveries\n\n"
-                "All without signing up! "
-            )
+            logger.info(f"Attempting guest login for deviceId: {device_id}")
+            login_response = await buyer_app.guest_user_login(login_data)
             
-            # Save session
-            save_persistent_session(session_obj, conversation_manager)
-            
-            return format_mcp_response(
-                False,
-                welcome_message,
-                session_obj.session_id,
-                device_id_required=True,
-                next_action="provide_device_id"
-            )
-        else:
-            # DeviceId provided - complete initialization
-            session_obj.device_id = device_id
-            logger.info(f"Initialized guest session {session_obj.session_id[:8]}... with deviceId: {device_id}")
-            
-            success_message = (
-                f"✅ **Guest Session Ready!**\n\n"
-                f"**Session ID:** `{session_obj.session_id}`\n"
-                f"**Device ID:** `{device_id}`\n"
-                f"**Mode:** Guest (No login required)\n\n"
-                f"🛍️ **Start Shopping:**\n"
-                f"• `search_products query='organic rice'`\n"
-                f"• `browse_categories`\n"
-                f"• `view_cart`\n\n"
-                f"🚀 **Full Order Journey Available:**\n"
-                f"Search → Cart → Checkout → Payment → Delivery\n\n"
-                f"Ready to shop! What would you like to find?"
-            )
-            
-            # Save session with deviceId
-            save_persistent_session(session_obj, conversation_manager)
-            
-            return format_mcp_response(
-                True,
-                success_message,
-                session_obj.session_id,
-                guest_mode=True,
-                device_id=device_id,
-                next_action="start_shopping"
-            )
+            if login_response and login_response.get('token'):
+                session_obj.auth_token = login_response['token']
+                session_obj.user_authenticated = True
+                logger.info(f"✅ Guest login successful for session {session_obj.session_id[:8]}... - Auth token acquired")
+                auth_status = "🔑 **Authenticated** (Guest login successful)"
+            else:
+                logger.warning(f"⚠️ Guest login failed for session {session_obj.session_id[:8]}... - No auth token received")
+                logger.debug(f"Login response: {login_response}")
+                auth_status = "⚠️ **Not Authenticated** (Guest login failed - limited functionality)"
+                
+        except Exception as login_error:
+            logger.error(f"❌ Guest login error for session {session_obj.session_id[:8]}...: {login_error}")
+            auth_status = "❌ **Authentication Error** (Guest login failed - limited functionality)"
+        
+        success_message = (
+            f"✅ **Guest Session Ready!**\n\n"
+            f"**Session ID:** `{session_obj.session_id}`\n"
+            f"**Device ID:** `{device_id}`\n"
+            f"**User ID:** `{config.guest.user_id}`\n"
+            f"**Auth Status:** {auth_status}\n\n"
+            f"🛍️ **Start Shopping:**\n"
+            f"• `search_products query='organic rice'`\n"
+            f"• `browse_categories`\n"
+            f"• `view_cart`\n\n"
+            f"🚀 **Full Order Journey Available:**\n"
+            f"Search → Cart → Checkout → Payment → Delivery\n\n"
+            f"Ready to shop! What would you like to find?"
+        )
+        
+        # Save session with configured IDs
+        save_persistent_session(session_obj, conversation_manager)
+        
+        return format_mcp_response(
+            True,
+            success_message,
+            session_obj.session_id,
+            guest_mode=True,
+            user_id=config.guest.user_id,
+            device_id=device_id,
+            next_action="start_shopping"
+        )
         
     except Exception as e:
         logger.error(f"Failed to initialize shopping: {e}")

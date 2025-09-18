@@ -127,14 +127,16 @@ async def initialize_order(
         # Get enhanced session with conversation tracking
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="initialize_order", **kwargs)
         
-        # Check authentication - required for order operations
-        if not session_obj.user_authenticated or not session_obj.auth_token:
-            return format_mcp_response(
-                False,
-                " **Login Required**\n\nYou must login before placing orders.\n\n **Use:** `phone_login phone='9876543210'`\n\nThis ensures secure order processing with the Himira backend.",
-                session_obj.session_id,
-                required_action="phone_login"
-            )
+        # GUEST MODE: Authentication check removed for guest journey
+        # Guest users can proceed without authentication
+        logger.info(f"[GUEST MODE] Proceeding with guest order initialization")
+        
+        # Ensure guest mode is active
+        if not session_obj.user_id:
+            session_obj.user_id = "guestUser"
+        if not session_obj.device_id:
+            from ..config import config
+            session_obj.device_id = config.guest.device_id
         
         # Validate session is in SELECT stage
         if session_obj.checkout_state.stage.value != 'select':
@@ -288,14 +290,16 @@ async def confirm_order(
         # Get enhanced session with conversation tracking
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="confirm_order", **kwargs)
         
-        # Check authentication - required for order confirmation
-        if not session_obj.user_authenticated or not session_obj.auth_token:
-            return format_mcp_response(
-                False,
-                " **Authentication Required**\n\nYou must be logged in to confirm orders.\n\n **Use:** `phone_login phone='9876543210'`\n\nSecure authentication is required for order confirmation.",
-                session_obj.session_id,
-                required_action="phone_login"
-            )
+        # GUEST MODE: Mock confirmation allowed without authentication
+        # This is a MOCK confirmation for testing only
+        logger.info(f"[GUEST MODE] Proceeding with MOCK order confirmation")
+        
+        # Ensure guest mode is active
+        if not session_obj.user_id:
+            session_obj.user_id = "guestUser"
+        if not session_obj.device_id:
+            from ..config import config
+            session_obj.device_id = config.guest.device_id
         
         # Validate session is in INIT stage
         if session_obj.checkout_state.stage.value != 'init':

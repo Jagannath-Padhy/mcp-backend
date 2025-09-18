@@ -125,10 +125,15 @@ async def view_cart(session_id: Optional[str] = None, **kwargs) -> Dict[str, Any
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="view_cart", **kwargs)
         logger.info(f"[Cart] View cart - Session ID: {session_obj.session_id}")
         
+        # Get guest configuration for consistent device ID
+        from ..config import Config
+        config = Config()
+        
         # If authenticated, fetch cart from backend
         if session_obj.user_authenticated and session_obj.user_id:
             logger.info(f"[Cart] Fetching cart from backend for user {session_obj.user_id}")
-            device_id = getattr(session_obj, 'device_id', f'mcp_{session_obj.session_id[:8]}')
+            # Use session device_id if available, otherwise fall back to configured guest device_id
+            device_id = getattr(session_obj, 'device_id', config.guest.device_id)
             
             # Get backend cart
             from ..buyer_backend_client import BuyerBackendClient

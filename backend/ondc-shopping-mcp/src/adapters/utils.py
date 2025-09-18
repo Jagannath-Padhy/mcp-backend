@@ -2,6 +2,7 @@
 
 from typing import Dict, Any, Optional, List
 import logging
+import json
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -22,6 +23,9 @@ def get_persistent_session(session_id: Optional[str] = None, tool_name: str = "u
     Returns:
         tuple: (session_obj, None) - None for conversation_manager (removed)
     """
+    # Log MCP tool call for debugging
+    logger.info(f"[MCP Tool Call] {tool_name} - Session: {session_id[:16] if session_id else 'NEW'}")
+    logger.debug(f"[MCP Tool Call] Full kwargs: {json.dumps(kwargs, default=str)}")
     from ..services.session_service import get_session_service
     session_service = get_session_service()
     
@@ -91,6 +95,11 @@ def format_mcp_response(success: bool, message: str, session_id: str,
     
     # Add any extra data
     response.update(extra_data)
+    
+    # Log MCP response for debugging
+    logger.debug(f"[MCP Response] Session: {session_id[:16]}... Success: {success}")
+    if not success:
+        logger.error(f"[MCP Error] {message}")
     
     return response
 

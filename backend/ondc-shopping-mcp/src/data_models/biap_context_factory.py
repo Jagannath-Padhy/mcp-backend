@@ -21,13 +21,23 @@ class BiapContextFactory:
         self.city_default = os.getenv("CITY", "std:080")
         self.timestamp = datetime.utcnow()
     
-    def get_city_by_pincode(self, pincode: Optional[str], city: Optional[str] = None) -> str:
+    def get_city_by_pincode(self, pincode: Optional[str], city: Optional[str] = None, action: Optional[str] = None) -> str:
         """
         Get proper city code by pincode - matches BIAP Node.js implementation
         
-        CRITICAL: For Himira backend, use just the pincode as city (not std:XXXX format)
-        This matches what the frontend/Postman sends
+        CRITICAL: For Himira backend SELECT requests, always use just the pincode as city
+        This matches what the Himira documentation shows
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"[BiapContext] get_city_by_pincode called: pincode={pincode}, city={city}, action={action}")
+        
+        # For SELECT action, always use pincode directly (Himira requirement)
+        if action == 'select' and pincode:
+            logger.info(f"[BiapContext] SELECT ACTION: Using pincode as city directly: {pincode}")
+            return pincode
+        
         # For Himira area pincodes, use just the pincode (not std: format)
         himira_pincodes = ['140301', '140401', '140501', '160001', '160002']
         
@@ -83,11 +93,19 @@ class BiapContextFactory:
         pincode = context_params.get('pincode')
         domain = context_params.get('domain', self.domain)
         
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[BiapContext] create() params: action={action}, city={city}, pincode={pincode}")
+        
+        # Get city value based on action and pincode
+        final_city = self.get_city_by_pincode(pincode, city, action)  # Pass action for proper city formatting
+        logger.info(f"[BiapContext] Final city value for {action}: {final_city}")
+        
         # Create context structure matching BIAP Node.js
         context = {
             "domain": domain,
             "country": self.country,
-            "city": self.get_city_by_pincode(pincode, city),
+            "city": final_city,
             "action": action,
             "core_version": "1.2.0",  # PROTOCOL_VERSION.v_1_2_0
             "bap_id": self.bap_id,

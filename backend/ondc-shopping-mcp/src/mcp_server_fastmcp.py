@@ -2,9 +2,9 @@
 """
 ONDC Shopping MCP Server - Official FastMCP Implementation
 
-A fully compliant MCP server implementation using the official Anthropic MCP SDK.
+A fully compliant MCP server implementation using the official MCP SDK.
 This implementation uses FastMCP with decorator patterns for maximum compatibility
-with Claude Desktop and Langflow.
+with MCP clients and AI agents.
 
 Key Features:
 - Official MCP SDK compliance
@@ -13,6 +13,30 @@ Key Features:
 - Full cart operations support
 - Vector search integration
 - Comprehensive error handling
+
+=== AGENT INSTRUCTIONS ===
+You are an ONDC shopping assistant operating in GUEST MODE.
+Guest credentials are pre-configured:
+- userId: guestUser
+- deviceId: d58dc5e2119ae5430b93218937977939
+
+Order Journey Flow (complete up to on_init):
+1. initialize_shopping → Create guest session
+2. search_products → Find products
+3. add_to_cart → Add to cart (auto-detects from search)
+4. view_cart → Show cart contents
+5. select_items_for_order → Get delivery quotes (needs city, state, pincode)
+6. initialize_order → Set customer details (name, address, phone, email)
+7. [on_init response received - order draft ready]
+8. create_payment → [MOCK] Create test payment
+9. confirm_order → [MOCK] Confirm with mock payment
+
+IMPORTANT:
+- Never ask for login/authentication
+- Guide users sequentially through the flow
+- Collect required info at each stage
+- Mark [MOCK] for payment/confirm operations
+- See mcp_agent_instructions.md for detailed guidance
 """
 
 import asyncio
@@ -105,43 +129,78 @@ mcp = FastMCP("ondc-shopping")
 # ============================================================================
 
 def extract_session_from_context(ctx: Context, **kwargs) -> Optional[str]:
-    """Extract session ID from MCP context and kwargs using biap-client patterns"""
+    """Extract session ID from MCP context and kwargs using biap-client patterns
+    
+    Enhanced to prefer existing sessions and maintain continuity between tool calls.
+    Session precedence order:
+    1. Explicit session_id parameter
+    2. Existing session from userId/deviceId combination
+    3. MCP transport context session
+    4. Default consistent session for testing
+    """
+    from .services.session_service import get_session_service
+    session_service = get_session_service()
+    
     session_id = None
     
-    # Method 1: Direct session_id parameter
+    # Method 1: Direct session_id parameter (highest priority)
     if kwargs.get('session_id'):
         session_id = kwargs['session_id']
-        logger.info(f"[Session] Found session_id in kwargs: {session_id}")
+        logger.info(f"[Session] Found explicit session_id: {session_id}")
+        return session_id
     
     # Method 2: Extract from userId/deviceId (biap-client pattern)
     user_id = kwargs.get('userId') or kwargs.get('user_id')
     device_id = kwargs.get('deviceId') or kwargs.get('device_id')
     
+    # Create consistent session ID patterns
     if user_id and device_id:
-        # Create session ID using biap-client pattern
-        session_id = f"{user_id}_{device_id}"
-        logger.info(f"[Session] Created session from userId/deviceId: {session_id}")
+        candidate_session_id = f"{user_id}_{device_id}"
+        # Check if this session already exists
+        existing_session = session_service.get(candidate_session_id)
+        if existing_session:
+            logger.info(f"[Session] Reusing existing session: {candidate_session_id}")
+            return candidate_session_id
+        else:
+            logger.info(f"[Session] Creating new session from userId/deviceId: {candidate_session_id}")
+            return candidate_session_id
+            
     elif device_id and (not user_id or user_id == "guestUser"):
-        # Guest user with device ID
-        session_id = f"guest_{device_id}"
-        logger.info(f"[Session] Created guest session: {session_id}")
+        candidate_session_id = f"guest_{device_id}"
+        existing_session = session_service.get(candidate_session_id)
+        if existing_session:
+            logger.info(f"[Session] Reusing existing guest session: {candidate_session_id}")
+            return candidate_session_id
+        else:
+            logger.info(f"[Session] Creating new guest session: {candidate_session_id}")
+            return candidate_session_id
+            
     elif user_id and user_id != "guestUser":
-        # Authenticated user without device ID
-        session_id = f"user_{user_id}"
-        logger.info(f"[Session] Created user session: {session_id}")
+        candidate_session_id = f"user_{user_id}"
+        existing_session = session_service.get(candidate_session_id)
+        if existing_session:
+            logger.info(f"[Session] Reusing existing user session: {candidate_session_id}")
+            return candidate_session_id
+        else:
+            logger.info(f"[Session] Creating new user session: {candidate_session_id}")
+            return candidate_session_id
     
-    # Method 3: Extract from MCP context (if available)
-    if not session_id and hasattr(ctx, 'session'):
-        session_id = getattr(ctx.session, 'id', None)
-        if session_id:
-            logger.info(f"[Session] Found session in MCP context: {session_id}")
+    # Method 3: Extract from MCP context (transport session)
+    if hasattr(ctx, 'session') and ctx.session:
+        mcp_session_id = getattr(ctx.session, 'id', None)
+        if mcp_session_id:
+            logger.info(f"[Session] Found session in MCP context: {mcp_session_id}")
+            return mcp_session_id
     
-    # Method 4: Generate default session for testing
-    if not session_id:
-        session_id = "default_mcp_session"
-        logger.warning(f"[Session] No session found, using default: {session_id}")
-    
-    return session_id
+    # Method 4: Check for existing default session (for test continuity)
+    default_session_id = "default_mcp_session"
+    existing_default = session_service.get(default_session_id)
+    if existing_default:
+        logger.info(f"[Session] Reusing existing default session: {default_session_id}")
+        return default_session_id
+    else:
+        logger.warning(f"[Session] Creating new default session for testing: {default_session_id}")
+        return default_session_id
 
 async def handle_tool_execution(tool_name: str, adapter_func, ctx: Context, **kwargs):
     """Generic handler for tool execution with proper session management"""
@@ -315,28 +374,75 @@ async def browse_categories(
 @mcp.tool()
 async def select_items_for_order(
     ctx: Context,
-    item_ids: List[str],
+    delivery_city: str,
+    delivery_state: str,
+    delivery_pincode: str,
     userId: Optional[str] = "guestUser",
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
-    """Select items from cart for order processing."""
+    """Get delivery quotes and options for items in cart (ONDC SELECT stage).
+    
+    This initiates the checkout process by checking delivery availability
+    and getting quotes for the items in your cart.
+    
+    Args:
+        delivery_city: City name (e.g., "Bangalore")
+        delivery_state: State name (e.g., "Karnataka")
+        delivery_pincode: PIN code (e.g., "560001")
+        userId: User ID (default: guestUser)
+        deviceId: Device identifier
+        session_id: Session identifier
+        
+    Returns:
+        Delivery quotes and availability information
+    """
     return await handle_tool_execution("select_items_for_order", select_items_adapter, ctx,
-                                     item_ids=item_ids, userId=userId, deviceId=deviceId,
-                                     session_id=session_id)
+                                     delivery_city=delivery_city, delivery_state=delivery_state,
+                                     delivery_pincode=delivery_pincode, userId=userId, 
+                                     deviceId=deviceId, session_id=session_id)
 
 @mcp.tool()
 async def initialize_order(
     ctx: Context,
-    delivery_address: Dict[str, Any],
+    customer_name: str,
+    delivery_address: str,
+    phone: str,
+    email: str,
+    payment_method: str = "razorpay",
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    pincode: Optional[str] = None,
     userId: Optional[str] = "guestUser",
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
-    """Initialize order with delivery details."""
+    """Initialize order with customer and delivery details (ONDC INIT stage).
+    
+    Prepares the order with complete billing and shipping information
+    after getting delivery quotes from SELECT stage.
+    
+    Args:
+        customer_name: Full name of the customer
+        delivery_address: Complete street address (e.g., "123 Main St, Apt 4B")
+        phone: Contact phone number (10 digits)
+        email: Email address
+        payment_method: Payment type - "razorpay", "upi", "card", "netbanking" (COD not supported)
+        city: Delivery city (optional - uses SELECT stage data if not provided)
+        state: Delivery state (optional - uses SELECT stage data if not provided)
+        pincode: Delivery PIN code (optional - uses SELECT stage data if not provided)
+        userId: User ID (default: guestUser)
+        deviceId: Device identifier
+        session_id: Session identifier
+        
+    Returns:
+        Order initialization confirmation with order draft details
+    """
     return await handle_tool_execution("initialize_order", init_order_adapter, ctx,
-                                     delivery_address=delivery_address, userId=userId,
-                                     deviceId=deviceId, session_id=session_id)
+                                     customer_name=customer_name, delivery_address=delivery_address,
+                                     phone=phone, email=email, payment_method=payment_method,
+                                     city=city, state=state, pincode=pincode,
+                                     userId=userId, deviceId=deviceId, session_id=session_id)
 
 @mcp.tool()
 async def create_payment(
@@ -355,14 +461,28 @@ async def create_payment(
 @mcp.tool()
 async def confirm_order(
     ctx: Context,
-    order_details: Dict[str, Any],
+    payment_status: str = "PAID",
     userId: Optional[str] = "guestUser",
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
-    """Confirm and finalize the order."""
+    """Confirm and finalize the order (ONDC CONFIRM stage).
+    
+    Finalizes the order after payment processing. In production mode,
+    this should be called after successful payment. In mock mode,
+    it can be called directly with payment_status="PAID".
+    
+    Args:
+        payment_status: Payment status - "PAID", "PENDING", or "FAILED" (default: "PAID" for mock mode)
+        userId: User ID (default: guestUser)
+        deviceId: Device identifier
+        session_id: Session identifier
+        
+    Returns:
+        Order confirmation with order ID and tracking information
+    """
     return await handle_tool_execution("confirm_order", confirm_adapter, ctx,
-                                     order_details=order_details, userId=userId,
+                                     payment_status=payment_status, userId=userId,
                                      deviceId=deviceId, session_id=session_id)
 
 # ============================================================================
@@ -671,7 +791,7 @@ def main():
         logger.info(f"Session Support: biap-client-node-js compatible")
         logger.info("=" * 60)
         logger.info("🚀 Starting FastMCP server...")
-        logger.info("📡 STDIO transport ready for Claude Desktop connection")
+        logger.info("📡 STDIO transport ready for MCP client connection")
         logger.info("✅ Server startup completed successfully")
         
         # Run the FastMCP server (handles its own event loop)
@@ -682,7 +802,7 @@ def main():
     except Exception as e:
         logger.error("❌ MCP Server startup FAILED!")
         logger.error(f"Error details: {e}")
-        logger.error("This error prevents Claude Desktop from connecting")
+        logger.error("This error prevents MCP client from connecting")
         logger.error("Check the error above and fix before retrying")
         raise
 

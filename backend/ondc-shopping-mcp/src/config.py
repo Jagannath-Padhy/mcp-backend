@@ -37,7 +37,7 @@ class VectorConfig:
     enabled: bool
     host: str = "localhost"
     port: int = 6333
-    collection: str = "ondc_products"
+    collection: str = "himira_products"
     embedding_model: str = "models/text-embedding-004"  # Must match ETL model
     vector_dimension: int = 768
     gemini_api_key: Optional[str] = None
@@ -84,6 +84,13 @@ class PaymentConfig:
     payment_provider: str = "razorpay_mock"  # Mock provider identifier
 
 
+@dataclass
+class GuestConfig:
+    """Guest user configuration for consistent guest journeys"""
+    user_id: str = "guestUser"
+    device_id: str = "d58dc5e2119ae5430b9321602618c878"
+    
+    
 @dataclass
 class LoggingConfig:
     """Logging configuration"""
@@ -143,6 +150,12 @@ class Config:
             mock_withholding_amount=os.getenv("MOCK_WITHHOLDING_AMOUNT", "0.00"),
             enable_cod_payments=os.getenv("ENABLE_COD_PAYMENTS", "false").lower() == "true",
             payment_provider=os.getenv("MCP_PAYMENT_PROVIDER", "razorpay_mock")
+        )
+        
+        # Guest User Configuration
+        self.guest = GuestConfig(
+            user_id=os.getenv("GUEST_USER_ID", "guestUser"),
+            device_id=os.getenv("GUEST_DEVICE_ID", "d58dc5e2119ae5430b9321602618c878")
         )
         
         # Logging Configuration
