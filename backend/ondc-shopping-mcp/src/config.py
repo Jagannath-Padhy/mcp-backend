@@ -118,7 +118,7 @@ class Config:
             enabled=os.getenv("VECTOR_SEARCH_ENABLED", "false").lower() == "true",
             host=os.getenv("QDRANT_HOST", "localhost"),
             port=int(os.getenv("QDRANT_PORT", "6333")),
-            collection=os.getenv("QDRANT_COLLECTION", "ondc_products"),
+            collection=os.getenv("QDRANT_COLLECTION", "himira_products"),
             gemini_api_key=os.getenv("GEMINI_API_KEY"),
             similarity_threshold=float(os.getenv("VECTOR_SIMILARITY_THRESHOLD", "0.7")),
             max_results=int(os.getenv("VECTOR_MAX_RESULTS", "20"))

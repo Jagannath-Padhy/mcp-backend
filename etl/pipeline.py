@@ -283,12 +283,21 @@ class ETLPipeline:
                 )
                 
             # Load the data - pass collection_config to enable auto-creation
-            return await loader.load_records(records, collection_name, collection_config={})
+            result = await loader.load_records(records, collection_name, collection_config={})
+            
+            # Optimize collection to trigger index building
+            # This ensures vectors are indexed immediately, not waiting for threshold
+            if result.success and result.loaded_count > 0:
+                logger.info(f"Optimizing collection {collection_name} to trigger indexing...")
+                await loader.optimize_collection(collection_name)
+                logger.info(f"Collection {collection_name} optimization triggered")
+            
+            return result
             
     def _get_collection_name(self, data_type: str) -> str:
         """Get collection name for data type"""
         collection_mapping = {
-            "products": os.getenv("QDRANT_PRODUCTS_COLLECTION", "ondc_products"),
+            "products": os.getenv("QDRANT_COLLECTION", "himira_products"),
             "categories": "himira_categories", 
             "providers": "himira_providers"
         }
