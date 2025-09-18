@@ -6,40 +6,118 @@
 
 This backend implements a complete ONDC (Open Network for Digital Commerce) shopping solution with AI assistance capabilities through MCP tools. It enables conversational shopping experiences where users can search, browse, add to cart, and complete purchases through natural language interactions.
 
-### Key Components
+### System Components
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Frontend Application                      │
 │                  (Web/Mobile/Chat Interface)                 │
 └─────────────────┬───────────────────────────────────────────┘
-                  │ HTTP/REST API
+                  │ HTTP/REST APIs
 ┌─────────────────▼───────────────────────────────────────────┐
-│                    MCP Backend (Port 8001)                   │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │               MCP Server (STDIO Transport)            │  │
-│  │                    40+ Shopping Tools                 │  │
-│  └──────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │                 Himira BIAP Backend                   │  │
-│  │              (ONDC Protocol Implementation)           │  │
-│  └──────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────┘
-                  │
+│              API Server (Port 8001)                          │
+│  • Chat API (/api/v1/chat) - Conversational interface        │
+│  • Session Management - Persistent shopping sessions         │
+│  • Cart APIs - Direct cart operations                       │
+│  • Search API - Product discovery                           │
+└─────────────────┬───────────────────────────────────────────┘
+                  │ MCP Agent (Internal)
 ┌─────────────────▼───────────────────────────────────────────┐
-│                         ONDC Network                         │
-│                    (Sellers, Logistics, etc.)                │
+│            MCP Server (STDIO Transport)                      │
+│  • 40+ Shopping Tools                                        │
+│  • Session Management Tools                                  │
+│  • ONDC Protocol Tools (SELECT, INIT, CONFIRM)              │
+│  • Cart & Order Management Tools                            │
+└─────────────────┬───────────────────────────────────────────┘
+                  │ API Calls
+┌─────────────────▼───────────────────────────────────────────┐
+│           Himira BIAP Backend (External)                     │
+│  • ONDC Protocol Implementation                              │
+│  • Network Gateway                                          │
+│  • Order Processing                                         │
+└─────────────────┬───────────────────────────────────────────┘
+                  │ ONDC Protocol
+┌─────────────────▼───────────────────────────────────────────┐
+│                    ONDC Network                              │
+│         (Sellers, Logistics, Payment Gateways)               │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│           Supporting Services (Docker Compose)               │
+├───────────────────────────────────────────────────────────────┤
+│  • Qdrant (Port 6333) - Vector search for products          │
+│  • ETL Pipeline - Data loader and embedding generator       │
+│  • Supervisor - Process manager for API server              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Core Services
+## 🔍 Under the Hood - How Services Work Together
 
-- **MCP Server**: Provides 40+ shopping tools via STDIO protocol for AI agents
-- **Guest Authentication**: Device-based authentication for seamless guest checkout
-- **Session Management**: Persistent sessions with auth token management
-- **ONDC Protocol**: Full implementation of SELECT, INIT, CONFIRM with async polling
-- **Vector Search**: Semantic product search using Qdrant (optional)
-- **Cart Management**: Comprehensive cart operations with persistence
+### Service Architecture
+
+| Service | Port | Purpose | Technology |
+|---------|------|---------|------------|
+| **API Server** | 8001 | REST API gateway, hosts Chat API, manages MCP agent | FastAPI + Python |
+| **MCP Server** | STDIO | Shopping tools for AI operations | MCP Protocol + STDIO |
+| **Qdrant** | 6333 | Vector database for semantic search | Qdrant Vector DB |
+| **ETL Pipeline** | One-time | Loads products, generates embeddings | Python + Gemini API |
+| **Himira Backend** | External | ONDC protocol implementation | Node.js (external) |
+
+### Data Flow for Shopping Journey
+
+```mermaid
+graph LR
+    A[User Message] --> B[Chat API]
+    B --> C[MCP Agent]
+    C --> D[Tool Selection]
+    D --> E[MCP Tool Execution]
+    E --> F[Himira Backend API]
+    F --> G[ONDC Network]
+    G --> H[Response Processing]
+    H --> I[User Response]
+```
+
+### Core Services Explained
+
+#### 1. **API Server** (`backend/api/server.py`)
+- **Role**: Main entry point for all client interactions
+- **Features**:
+  - Chat API for conversational shopping
+  - Session management with TTL
+  - Rate limiting (20 req/min)
+  - MCP agent integration
+  - Direct cart and search APIs
+- **Managed by**: Supervisor process manager
+
+#### 2. **MCP Server** (`backend/ondc-shopping-mcp/`)
+- **Role**: Provides shopping tools for AI agent
+- **Communication**: STDIO transport (not HTTP)
+- **Tools**: 40+ tools including:
+  - Session management (initialize_shopping, get_session_info)
+  - Product discovery (search_products, browse_categories)
+  - Cart operations (add_to_cart, view_cart, update_cart)
+  - ONDC checkout (select_items_for_order, initialize_order, confirm_order)
+  - Order management (track_order, get_order_status)
+
+#### 3. **Qdrant Vector Database**
+- **Role**: Semantic product search
+- **Collection**: `himira_products` (94 products with embeddings)
+- **Embedding Model**: Gemini text-embedding-004 (768 dimensions)
+- **Usage**: Enhanced search via MCP tools
+
+#### 4. **ETL Pipeline**
+- **Role**: One-time data initialization
+- **Process**:
+  1. Fetches products from Himira backend
+  2. Generates embeddings using Gemini API
+  3. Stores in Qdrant collection
+- **Runs**: Once on `make init` or container startup
+
+#### 5. **Himira BIAP Backend** (External)
+- **URL**: https://hp-buyer-backend-preprod.himira.co.in
+- **Role**: Actual ONDC protocol implementation
+- **Authentication**: WIL_API_KEY header
+- **Handles**: SELECT, INIT, CONFIRM, order tracking
 
 ## 🚀 Quick Start
 
@@ -80,11 +158,81 @@ make logs      # View logs
 make status    # Check health
 ```
 
-## 📚 API Documentation
+## 📚 Complete API Documentation
 
 ### Base URL
 ```
 http://localhost:8001
+```
+
+### Service Endpoints Map
+
+| Endpoint | Method | Service | Description |
+|----------|--------|---------|-------------|
+| `/` | GET | API Server | API information and status |
+| `/health` | GET | API Server | Health check endpoint |
+| `/api/v1/chat` | POST | API Server | Main conversational shopping interface |
+| `/api/v1/sessions` | POST | API Server | Create new session |
+| `/api/v1/sessions/{id}` | GET | API Server | Get session info |
+| `/api/v1/sessions/{id}` | DELETE | API Server | Delete session |
+| `/api/v1/search` | POST | API Server | Direct product search |
+| `/api/v1/cart/{device_id}` | POST | API Server | Direct cart operations |
+| MCP Tools | STDIO | MCP Server | 40+ tools via STDIO (not HTTP) |
+
+### 💬 Chat API - The Main Interface
+
+#### POST `/api/v1/chat`
+The conversational interface that connects users to the AI shopping assistant.
+
+**Request:**
+```json
+{
+  "message": "I want to buy organic ghee",
+  "session_id": "session_abc123",  // Optional, auto-generated if not provided
+  "device_id": "device_xyz789"      // Optional, auto-generated if not provided
+}
+```
+
+**Response:**
+```json
+{
+  "response": "I found several organic ghee products for you:\n\n1. **Organic Ghee** from Protean Grocery - ₹450\n2. **Himira Cow Ghee** - ₹899\n\nWould you like to add any to your cart?",
+  "session_id": "session_abc123",
+  "device_id": "device_xyz789",
+  "timestamp": "2025-09-18T10:30:45.123456"
+}
+```
+
+**Example Conversation Flow:**
+```bash
+# Start shopping
+curl -X POST http://localhost:8001/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hi, I want to shop for groceries"}'
+
+# Search products
+curl -X POST http://localhost:8001/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Show me organic rice options",
+    "session_id": "session_abc123"
+  }'
+
+# Add to cart
+curl -X POST http://localhost:8001/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Add the first item to my cart",
+    "session_id": "session_abc123"
+  }'
+
+# Checkout
+curl -X POST http://localhost:8001/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "I want to checkout. Deliver to Bangalore 560001",
+    "session_id": "session_abc123"
+  }'
 ```
 
 ### Authentication Flow
@@ -106,6 +254,41 @@ Response:
   "auth_token": "eyJhbGciOiJIUzI1NiIs...",
   "device_id": "d58dc5e2119ae5430b9321602618c878",
   "message": "Guest session ready with authentication"
+}
+```
+
+### Session Management
+
+The system uses session-based shopping with automatic guest authentication:
+
+1. **Session Creation**: Automatically created on first request
+2. **Guest Authentication**: Device-based auth token generated
+3. **Session Persistence**: Sessions stored with 24-hour TTL
+4. **Context Maintenance**: Cart, user preferences, and checkout state preserved
+
+```javascript
+// Frontend Session Management Example
+let sessionId = null;
+let deviceId = null;
+
+async function sendMessage(message) {
+    const response = await fetch('http://localhost:8001/api/v1/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            message: message,
+            session_id: sessionId,  // Include if exists
+            device_id: deviceId     // Include if exists
+        })
+    });
+    
+    const data = await response.json();
+    
+    // Store session for future requests
+    sessionId = data.session_id;
+    deviceId = data.device_id;
+    
+    return data.response;
 }
 ```
 
@@ -401,6 +584,155 @@ mcp-backend/
 └── README.md
 ```
 
+## ⚙️ Configuration Guide
+
+### Environment Variables (.env)
+
+All configuration is managed through environment variables. Copy `.env.example` to `.env` and configure:
+
+#### Required Configuration
+
+```bash
+# Himira Backend Integration (REQUIRED)
+WIL_API_KEY=your-api-key-here           # Auth key for Himira backend
+BACKEND_ENDPOINT=https://hp-buyer-backend-preprod.himira.co.in/clientApis
+
+# Guest User Configuration (REQUIRED)
+GUEST_USER_ID=guestUser                 # Default guest user ID
+GUEST_DEVICE_ID=d58dc5e2119ae5430b9321602618c878  # Default device ID
+```
+
+#### Optional Configuration
+
+```bash
+# AI/Embedding Configuration
+GEMINI_API_KEY=your-gemini-key          # For vector embeddings (optional)
+GOOGLE_API_KEY=your-gemini-key          # Same as GEMINI_API_KEY
+
+# Database Configuration
+QDRANT_HOST=qdrant                      # Qdrant host (Docker: qdrant, Local: localhost)
+QDRANT_PORT=6333                        # Qdrant port
+QDRANT_COLLECTION=himira_products       # Collection name for products
+
+# Feature Flags
+VECTOR_SEARCH_ENABLED=true              # Enable/disable vector search
+HYBRID_SEARCH_ENABLED=true              # Enable hybrid search (text + vector)
+
+# API Settings
+API_PORT=8001                           # API server port
+CORS_ORIGINS=*                          # CORS allowed origins
+RATE_LIMIT_PER_MIN=20                   # Rate limit per minute
+SESSION_TTL_HOURS=24                    # Session expiry time
+
+# Logging
+LOG_LEVEL=INFO                          # Log level (DEBUG, INFO, WARNING, ERROR)
+
+# ETL Settings
+ETL_MODE=init                           # ETL mode (init, update, refresh)
+
+# MCP Transport
+MCP_TRANSPORT=stdio                     # MCP transport protocol
+PYTHONUNBUFFERED=1                     # Python unbuffered output
+```
+
+### Configuration Files
+
+#### 1. `docker-compose.yml`
+- **Purpose**: Defines all services and their configuration
+- **Services**: backend, qdrant, etl
+- **Networks**: backend-network (bridge)
+- **Volumes**: Sessions, logs, config files
+
+#### 2. `supervisord.conf`
+- **Location**: `backend/supervisord.conf`
+- **Purpose**: Manages API server process
+- **Programs**: api-server (FastAPI application)
+- **Logs**: `/app/logs/api-server.err.log`, `/app/logs/api-server.out.log`
+
+#### 3. `config/etl_config.yaml`
+- **Purpose**: ETL pipeline configuration
+- **Settings**: Batch size, retry logic, data sources
+
+#### 4. `config/vector_config.yaml`
+- **Purpose**: Vector search configuration
+- **Settings**: Embedding model, dimensions, similarity metrics
+
+## 🔄 How It Works - Complete Shopping Flow
+
+### Step-by-Step Journey
+
+1. **User Sends Message**
+   - Frontend sends message to `/api/v1/chat`
+   - Session ID maintained for context
+
+2. **API Server Processing**
+   - Receives chat request
+   - Creates/retrieves session
+   - Passes to MCP Agent
+
+3. **MCP Agent Intelligence**
+   - Analyzes user intent
+   - Selects appropriate MCP tools
+   - Executes tool sequence
+
+4. **MCP Tool Execution**
+   - Tools communicate via STDIO
+   - Each tool performs specific action:
+     - `search_products` → Searches Himira backend
+     - `add_to_cart` → Updates session cart
+     - `select_items_for_order` → Gets delivery quotes
+
+5. **Backend Integration**
+   - MCP tools call Himira backend APIs
+   - Authentication via WIL_API_KEY
+   - ONDC protocol operations
+
+6. **Response Generation**
+   - Tool results processed
+   - Natural language response generated
+   - Sent back to user
+
+### Example Flow: Complete Purchase
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant C as Chat API
+    participant M as MCP Agent
+    participant T as MCP Tools
+    participant H as Himira Backend
+    participant O as ONDC Network
+    
+    U->>C: "I want to buy organic rice"
+    C->>M: Process intent
+    M->>T: search_products("organic rice")
+    T->>H: GET /v2/search
+    H->>O: ONDC Search
+    O-->>H: Product results
+    H-->>T: Products data
+    T-->>M: Search results
+    M-->>C: Format response
+    C-->>U: "Found 3 organic rice options..."
+    
+    U->>C: "Add first item to cart"
+    C->>M: Process intent
+    M->>T: add_to_cart(item_id, quantity)
+    T-->>M: Cart updated
+    M-->>C: Format response
+    C-->>U: "Added to cart. Total: ₹450"
+    
+    U->>C: "Checkout to Bangalore 560001"
+    C->>M: Process intent
+    M->>T: select_items_for_order()
+    T->>H: POST /v2/select
+    H->>O: ONDC SELECT
+    O-->>H: Delivery quotes
+    H-->>T: Quote details
+    T-->>M: Delivery options
+    M-->>C: Format response
+    C-->>U: "Delivery available. Proceed?"
+```
+
 ## 🔧 Development
 
 ### Local Development
@@ -459,7 +791,118 @@ LOG_LEVEL=INFO
 LOG_FILE=/app/logs/mcp_operations.log
 ```
 
+## 📋 Quick Reference
+
+### Port Mappings
+
+| Service | Port | Description |
+|---------|------|-------------|
+| API Server | 8001 | Main REST API |
+| Qdrant | 6333 | Vector database HTTP |
+| Qdrant | 6334 | Vector database GRPC |
+
+### Important Paths
+
+| Path | Description |
+|------|-------------|
+| `/app/logs/` | All application logs |
+| `/app/sessions/` | Session storage |
+| `/app/ondc-shopping-mcp/` | MCP server code |
+| `/app/api/` | API server code |
+| `~/.ondc-mcp/sessions/` | Local session storage |
+
+### Log Files
+
+| Log File | Purpose |
+|----------|---------|  
+| `api-server.err.log` | API server errors |
+| `api-server.out.log` | API server output |
+| `mcp_operations.log` | MCP tool operations |
+| `supervisord.log` | Process manager logs |
+
+### Debug Commands
+
+```bash
+# Check all services status
+make status
+
+# View API server logs
+docker logs mcp-backend
+
+# View specific service logs
+docker-compose logs -f backend
+docker-compose logs -f qdrant
+docker-compose logs -f etl
+
+# Shell into backend container
+docker exec -it mcp-backend bash
+
+# Check supervisor status
+docker exec mcp-backend supervisorctl status
+
+# Test health endpoint
+curl http://localhost:8001/health
+
+# Test chat API
+curl -X POST http://localhost:8001/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello"}'
+
+# Check Qdrant collection
+curl http://localhost:6333/collections/himira_products
+
+# Monitor MCP operations
+docker exec mcp-backend tail -f /app/logs/mcp_operations.log
+```
+
 ## 🐛 Troubleshooting
+
+### Service-Specific Issues
+
+#### API Server Issues
+```bash
+# Check if running
+docker exec mcp-backend supervisorctl status api-server
+
+# Restart API server
+docker exec mcp-backend supervisorctl restart api-server
+
+# Check error logs
+docker exec mcp-backend tail -100 /app/logs/api-server.err.log
+```
+
+#### MCP Server Issues
+```bash
+# Check MCP operations log
+docker exec mcp-backend tail -f /app/logs/mcp_operations.log
+
+# Test MCP tool directly
+docker exec mcp-backend python /app/ondc-shopping-mcp/test_mcp_direct.py
+```
+
+#### Qdrant Issues
+```bash
+# Check Qdrant health
+curl http://localhost:6333/health
+
+# Check collection info
+curl http://localhost:6333/collections/himira_products
+
+# Reindex products
+make init  # This will reload products
+```
+
+#### ETL Pipeline Issues
+```bash
+# Check ETL logs
+docker logs mcp-etl
+
+# Manually run ETL
+docker-compose run etl
+
+# Check if products loaded
+curl http://localhost:6333/collections/himira_products | jq '.result.points_count'
+```
 
 ### Common Issues
 
