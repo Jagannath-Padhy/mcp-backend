@@ -1,0 +1,42 @@
+logger:
+  type: console
+  level: info
+
+mcp:
+  servers:
+    ondc-shopping:
+      command: python
+      args: ["/app/ondc-shopping-mcp/run_mcp_server.py"]
+      env:
+        # Transport
+        MCP_TRANSPORT: stdio
+        PYTHONUNBUFFERED: "1"
+        
+        # Backend configuration - SET VIA ENVIRONMENT VARIABLES
+        # BACKEND_ENDPOINT: ${BACKEND_ENDPOINT}
+        # WIL_API_KEY: ${WIL_API_KEY}
+        # GEMINI_API_KEY: ${GEMINI_API_KEY}
+        
+        # Vector Search
+        VECTOR_SEARCH_ENABLED: "true"
+        QDRANT_HOST: qdrant
+        QDRANT_PORT: "6333"
+        QDRANT_COLLECTION: himira_products
+        VECTOR_SIMILARITY_THRESHOLD: "0.7"
+        VECTOR_MAX_RESULTS: "20"
+        
+        # Session Management
+        SESSION_STORE: file
+        SESSION_STORE_PATH: /app/sessions
+        SESSION_TIMEOUT_MINUTES: "30"
+        
+        # Performance & Caching
+        CACHE_ENABLED: "true"
+        CACHE_TTL_SECONDS: "300"
+        CONCURRENT_SEARCHES: "5"
+        
+        # Logging
+        LOG_LEVEL: INFO
+        LOG_FILE: /app/logs/mcp_operations.log
+        DEBUG_CURL_LOGGING: "false"
+        MCP_DEBUG_PAYMENT_LOGS: "false"

@@ -1,0 +1,929 @@
+"""Checkout service for managing checkout flow"""
+
+from typing import Dict, List, Optional, Any, Tuple
+import logging
+import uuid
+import json
+
+from ..models.session import Session, CheckoutState, CheckoutStage, DeliveryInfo
+from ..buyer_backend_client import BuyerBackendClient
+from ..data_models.biap_context_factory import get_biap_context_factory
+from ..services.product_enrichment_service import get_product_enrichment_service
+from ..services.biap_validation_service import get_biap_validation_service
+from ..services.payment_mock_service import mock_payment_service
+from ..utils.city_code_mapping import get_city_code_by_pincode
+from ..utils.logger import get_logger
+from ..config import config
+
+# Import centralized utilities
+from ..utils.ondc_constants import (
+    get_city_gps,
+    DEFAULT_GPS,
+    ERROR_MESSAGES
+)
+from ..utils.location_utils import (
+    transform_provider_locations,
+    create_provider_for_context,
+    extract_location_ids,
+    build_location_objects
+)
+
+logger = get_logger(__name__)
+
+
+class CheckoutService:
+    """BIAP-compatible consolidated ONDC checkout service with 3 optimized methods"""
+    
+    def __init__(self, buyer_backend_client: Optional[BuyerBackendClient] = None):
+        """
+        Initialize checkout service with BIAP-compatible services
+        
+        Args:
+            buyer_backend_client: Client for backend API calls
+        """
+        self.buyer_app = buyer_backend_client or BuyerBackendClient()
+        self.context_factory = get_biap_context_factory()
+        self.product_enrichment = get_product_enrichment_service()
+        self.validation = get_biap_validation_service()
+        logger.info("CheckoutService initialized with BIAP-compatible services")
+    
+    async def select_items_for_order(
+        self, 
+        session: Session, 
+        delivery_city: str,
+        delivery_state: str,
+        delivery_pincode: str
+    ) -> Dict[str, Any]:
+        """
+        BIAP-compatible ONDC SELECT stage - Get quotes and fulfillment options
+        
+        Enhanced with:
+        - Product enrichment using BIAP APIs
+        - BIAP validation (multiple BPP/Provider checks)
+        - Proper city code mapping
+        - BIAP context factory
+        
+        Args:
+            session: User session with cart items
+            delivery_city: Delivery city
+            delivery_state: Delivery state  
+            delivery_pincode: Delivery pincode
+            
+        Returns:
+            Quote and fulfillment options from ONDC SELECT
+        """
+        # Validate cart
+        if session.cart.is_empty():
+            return {
+                'success': False,
+                'message': ' Cart is empty. Please add items first.'
+            }
+        
+        # Validate delivery location
+        if not all([delivery_city, delivery_state, delivery_pincode]):
+            return {
+                'success': False,
+                'message': ' Missing delivery location. Please provide city, state, and pincode.'
+            }
+        
+        # Generate transaction ID for this checkout session
+        session.checkout_state.transaction_id = self._generate_transaction_id()
+        
+        try:
+            logger.info(f"[CheckoutService] Starting SELECT with {len(session.cart.items)} items")
+            logger.debug(f"[CheckoutService] Delivery location: {delivery_city}, {delivery_state}, {delivery_pincode}")
+            logger.debug(f"[CheckoutService] Cart items: {[{'name': item.name, 'id': item.id, 'local_id': getattr(item, 'local_id', None)} for item in session.cart.items]}")
+            
+            # Step 1: Enrich cart items with BIAP product data
+            logger.info("[CheckoutService] Step 1: Enriching cart items with BIAP product data...")
+            enriched_items = await self.product_enrichment.enrich_cart_items(
+                session.cart.items, session.session_id
+            )
+            logger.debug(f"[CheckoutService] Enriched {len(enriched_items)} items")
+            
+            # Step 2: BIAP validation - check for multiple BPP/Provider items
+            logger.info("[CheckoutService] Step 2: Validating order items for BIAP compliance...")
+            validation_result = self.validation.validate_order_items(enriched_items, "select")
+            logger.debug(f"[CheckoutService] Validation result: {validation_result}")
+            if not validation_result.get('success'):
+                logger.error(f"[CheckoutService] Validation failed: {validation_result.get('error', {})}")
+                return {
+                    'success': False,
+                    'message': f" {validation_result['error']['message']}"
+                }
+            
+            # Step 3: Get proper city code from pincode
+            logger.info(f"[CheckoutService] Step 3: Getting city code for pincode {delivery_pincode}...")
+            city_code = get_city_code_by_pincode(delivery_pincode)
+            logger.debug(f"[CheckoutService] City code: {city_code}")
+            
+            # Step 4: Create BIAP-compatible context (match Postman collection format)
+            logger.info("[CheckoutService] Step 4: Creating BIAP-compatible context...")
+            context = self.context_factory.create({
+                'action': 'select',
+                'transaction_id': session.checkout_state.transaction_id,
+                'city': delivery_pincode,  #  CRITICAL: Use pincode like Postman, not city_code
+                'pincode': delivery_pincode
+            })
+            logger.debug(f"[CheckoutService] Context created: {json.dumps(context, indent=2)}")
+            
+            # Step 5: Get BPP info from validated items
+            logger.info("[CheckoutService] Step 5: Getting BPP info from validated items...")
+            bpp_info = self.validation.get_order_bpp_info(enriched_items)
+            logger.debug(f"[CheckoutService] BPP info: {bpp_info}")
+            if bpp_info:
+                context['bpp_id'] = bpp_info['bpp_id']
+                context['bpp_uri'] = bpp_info['bpp_uri']
+                logger.info(f"[CheckoutService] Using BPP: {bpp_info['bpp_id']} at {bpp_info['bpp_uri']}")
+            
+            # Step 6: Transform enriched items to BIAP SELECT format
+            logger.info("[CheckoutService] Step 6: Transforming items to BIAP SELECT format...")
+            select_items = []
+            location_set = set()
+            provider_info = None
+            
+            for item in enriched_items:
+                # Create SELECT item structure (Postman collection format)
+                select_item = {
+                    'id': item.id,                   # Full ONDC ID
+                    'local_id': item.local_id,       # UUID local ID
+                    'quantity': {'count': item.quantity},  # Wrapped in count object
+                    'customisationState': {},        # Required by Postman format
+                    'customisations': None,          # Required by Postman format
+                    'hasCustomisations': False       # Required by Postman format
+                }
+                
+                # Add location_id if available
+                if item.location_id:
+                    select_item['location_id'] = item.location_id
+                    location_set.add(item.location_id)
+                
+                # Add provider at item level using utility
+                if item.provider:
+                    select_item['provider'] = create_provider_for_context(
+                        item.provider, 
+                        context="item"
+                    )
+                
+                # Capture provider info from first item
+                if not provider_info and item.provider:
+                    provider_info = item.provider
+                
+                select_items.append(select_item)
+            
+            # Step 7: Build location objects using utility
+            location_objs = build_location_objects(location_set, provider_info)
+            
+            # Step 8: Create SELECT request matching working Postman collection
+            # Backend expects message.cart structure with provider at cart level
+            
+            # Create provider at cart level using utility
+            cart_provider = create_provider_for_context(
+                provider_info, 
+                context="cart"
+            ) if provider_info else None
+            
+            cart_obj = {
+                'items': select_items  # Items have provider at item level
+            }
+            
+            # Add provider at cart level if available (for backend transformation)
+            if cart_provider:
+                cart_obj['provider'] = cart_provider
+            
+            # Get GPS coordinates using centralized utility
+            gps_coords = get_city_gps(delivery_city)
+            
+            #  CRITICAL: Simplify fulfillments to match Postman collection exactly
+            fulfillments_obj = [{
+                'end': {
+                    'location': {
+                        'gps': gps_coords,  #  Proper lat,lng coordinates
+                        'address': {
+                            'area_code': delivery_pincode  #  Only area_code like Postman
+                        }
+                    }
+                }
+            }]
+            
+            select_data = {
+                'context': context,
+                'message': {
+                    'cart': cart_obj,             #  Backend expects 'cart' (confirmed from Postman collection)
+                    'fulfillments': fulfillments_obj  #  At message level as backend expects
+                },
+                'userId': session.session_id
+            }
+            
+            logger.info("[CheckoutService] Step 9: Calling BIAP SELECT API...")
+            logger.debug(f"[CheckoutService] SELECT request payload:\n{json.dumps(select_data, indent=2)}")
+            
+            # Get auth token from session for authenticated SELECT
+            auth_token = getattr(session, 'auth_token', None)
+            if not auth_token:
+                logger.warning("[CheckoutService] No auth token found - SELECT may fail if auth is required")
+            else:
+                logger.info("[CheckoutService] Using auth token for SELECT request")
+            
+            # Call BIAP SELECT API with auth token
+            result = await self.buyer_app.select_items(select_data, auth_token=auth_token)
+            
+            logger.info(f"[CheckoutService] SELECT API response received")
+            logger.debug(f"[CheckoutService] SELECT response: {json.dumps(result, indent=2) if result else 'None'}")
+            
+            if result and result.get('success', True) and 'error' not in result:
+                # Update session to SELECT stage
+                session.checkout_state.stage = CheckoutStage.SELECT
+                session.add_to_history('select_items_for_order', {
+                    'city': delivery_city,
+                    'state': delivery_state, 
+                    'pincode': delivery_pincode,
+                    'items_count': len(session.cart.items)
+                })
+                
+                logger.info("[CheckoutService]  SELECT successful - delivery quotes received")
+                return {
+                    'success': True,
+                    'message': f' Delivery available in {delivery_city}! Quotes ready.',
+                    'stage': 'select_completed',
+                    'quote_data': result,
+                    'next_step': 'provide_complete_delivery_details'
+                }
+            else:
+                error_msg = result.get('message', 'Failed to get delivery quotes') if result else 'SELECT API failed'
+                logger.error(f"[CheckoutService] SELECT failed: {error_msg}")
+                logger.error(f"[CheckoutService] Full error response: {result}")
+                return {
+                    'success': False,
+                    'message': f' {error_msg}'
+                }
+                
+        except Exception as e:
+            logger.error(f"[CheckoutService] SELECT operation failed with exception: {e}", exc_info=True)
+            return {
+                'success': False,
+                'message': ' Failed to get delivery options. Please try again.'
+            }
+    
+    async def initialize_order(
+        self,
+        session: Session,
+        customer_name: str,
+        delivery_address: str,
+        phone: str,
+        email: str,
+        payment_method: str = 'cod',
+        city: Optional[str] = None,
+        state: Optional[str] = None,
+        pincode: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        BIAP-compatible ONDC INIT stage - Initialize order with complex delivery structure
+        
+        Enhanced with:
+        - BIAP validation (multiple BPP/Provider checks)
+        - Proper city code mapping from pincode
+        - BIAP context factory
+        - Complex billing/delivery info structure matching BIAP patterns
+        
+        Args:
+            session: User session (must be in SELECT stage)
+            customer_name: Customer's full name
+            delivery_address: Complete street address
+            phone: Contact phone number
+            email: Contact email
+            payment_method: Payment method (cod, upi, card, netbanking)
+            city: Delivery city (optional - extracted from SELECT stage if not provided)
+            state: Delivery state (optional - extracted from SELECT stage if not provided)
+            pincode: Delivery pincode (optional - extracted from SELECT stage if not provided)
+            
+        Returns:
+            Order initialization status
+        """
+        # Validate session is in SELECT stage
+        if session.checkout_state.stage != CheckoutStage.SELECT:
+            return {
+                'success': False,
+                'message': ' Please select delivery location first.'
+            }
+        
+        # Validate all required information
+        missing = []
+        if not customer_name: missing.append("customer name")
+        if not delivery_address: missing.append("delivery address")
+        if not phone: missing.append("phone number")
+        if not email: missing.append("email")
+        
+        if missing:
+            return {
+                'success': False,
+                'message': f' Missing: {", ".join(missing)}'
+            }
+        
+        # Validate payment method - COD NOT SUPPORTED by Himira backend
+        if config.payment.enable_cod_payments:
+            valid_methods = ['razorpay', 'upi', 'card', 'netbanking', 'cod']  # COD enabled (for testing)
+        else:
+            valid_methods = ['razorpay', 'upi', 'card', 'netbanking']  # COD disabled (production)
+            
+        if payment_method.lower() not in valid_methods:
+            return {
+                'success': False,
+                'message': f' Invalid payment method. COD not supported by Himira backend. Choose: {", ".join(valid_methods)}'
+            }
+            
+        # Log payment method selection with mock indicators
+        if config.payment.debug_logs:
+            logger.info(f"[PAYMENT METHOD] Selected: {payment_method.lower()}")
+            logger.info(f"[PAYMENT CONFIG] COD enabled: {config.payment.enable_cod_payments}")
+            logger.info(f"[PAYMENT CONFIG] Mock mode: {config.payment.mock_mode}")
+        
+        try:
+            logger.info(f"[CheckoutService] Starting INIT for customer: {customer_name}")
+            
+            # Step 1: Get enriched items for validation
+            enriched_items = await self.product_enrichment.enrich_cart_items(
+                session.cart.items, session.session_id
+            )
+            
+            # Step 2: BIAP validation - check for multiple BPP/Provider items  
+            validation_result = self.validation.validate_order_items(enriched_items, "init")
+            if not validation_result.get('success'):
+                return {
+                    'success': False,
+                    'message': f" {validation_result['error']['message']}"
+                }
+            
+            # Step 3: Get delivery location from SELECT stage or parameters
+            # Use provided parameters or fall back to stored delivery info
+            final_city = city or session.checkout_state.delivery_info.city if session.checkout_state.delivery_info else "Bangalore"
+            final_state = state or session.checkout_state.delivery_info.city if session.checkout_state.delivery_info else "Karnataka" 
+            final_pincode = pincode or "560001"  # Should be captured from SELECT stage
+            
+            # Step 4: Get proper city code from pincode
+            city_code = get_city_code_by_pincode(final_pincode)
+            
+            # Step 5: Create BIAP-compatible context
+            context = self.context_factory.create({
+                'action': 'init',
+                'transaction_id': session.checkout_state.transaction_id,
+                'city': city_code,
+                'pincode': final_pincode
+            })
+            
+            # Step 6: Get BPP info from validated items
+            bpp_info = self.validation.get_order_bpp_info(enriched_items)
+            if bpp_info:
+                context['bpp_id'] = bpp_info['bpp_id']
+                context['bpp_uri'] = bpp_info['bpp_uri']
+            
+            # Step 7: Create BIAP-compatible billing info structure
+            billing_info = {
+                'name': customer_name,
+                'phone': phone,
+                'email': email,
+                'address': {
+                    'name': customer_name,
+                    'building': delivery_address,
+                    'locality': "Area",  # Could be extracted from address
+                    'city': final_city,
+                    'state': final_state,
+                    'country': "IND",
+                    'area_code': final_pincode
+                }
+            }
+            
+            # Step 8: Create delivery info from billing info (BIAP pattern)
+            from ..utils.city_code_mapping import create_delivery_info_from_billing_info
+            delivery_info = create_delivery_info_from_billing_info(billing_info)
+            
+            # Step 9: Set session delivery and payment info
+            session.checkout_state.delivery_info = DeliveryInfo(
+                address=delivery_address,
+                phone=phone,
+                email=email,
+                name=customer_name,
+                city=final_city,
+                pincode=final_pincode
+            )
+            session.checkout_state.payment_method = payment_method.lower()
+            
+            # Step 10: Transform enriched items to BIAP INIT format
+            init_items = []
+            fulfillment_ids = []
+            for item in enriched_items:
+                init_item = {
+                    'id': item.local_id,
+                    'quantity': {'count': item.quantity}
+                }
+                
+                # Add fulfillment_id if available
+                if item.fulfillment_id:
+                    init_item['fulfillment_id'] = item.fulfillment_id
+                    fulfillment_ids.append(item.fulfillment_id)
+                
+                # Add customisations if available
+                if item.customisations:
+                    init_item['tags'] = item.customisations
+                
+                init_items.append(init_item)
+            
+            # Step 11: Create BIAP-compatible INIT request
+            init_data = {
+                'context': context,
+                'message': {
+                    'order': {
+                        'billing': billing_info,
+                        'items': init_items,
+                        'fulfillments': [{
+                            'id': fulfillment_ids[0] if fulfillment_ids else "1",
+                            'type': 'Delivery',
+                            'end': {
+                                'contact': {
+                                    'phone': phone,
+                                    'email': email
+                                },
+                                'location': {
+                                    **delivery_info['location'],
+                                    'address': {
+                                        **delivery_info['location']['address'],
+                                        'name': customer_name,
+                                        'area_code': final_pincode
+                                    }
+                                }
+                            },
+                            'customer': {
+                                'person': {
+                                    'name': customer_name
+                                }
+                            }
+                        }],
+                        'payment': {
+                            'type': 'ON-ORDER',  # BIAP Standard: Always ON-ORDER for online payments
+                            'collected_by': 'BAP'  # BIAP Standard: Always BAP for ON-ORDER payments
+                        }
+                    }
+                },
+                'userId': session.session_id
+            }
+            
+            # Step 12: Call BIAP INIT API - Authentication Required
+            # Get auth token from session - mandatory for order operations
+            auth_token = getattr(session, 'auth_token', None)
+            if not auth_token:
+                logger.error("[CheckoutService] Missing auth token - authentication required for order initialization")
+                return {
+                    'success': False,
+                    'message': ' Authentication required. Please login first using phone_login tool.'
+                }
+            
+            result = await self.buyer_app.initialize_order(init_data, auth_token=auth_token)
+            
+            if result and result.get('success', True) and 'error' not in result:
+                # Update session to INIT stage  
+                session.checkout_state.stage = CheckoutStage.INIT
+                session.add_to_history('initialize_order', {
+                    'address': delivery_address,
+                    'phone': phone,
+                    'email': email,
+                    'payment_method': payment_method
+                })
+                
+                return {
+                    'success': True,
+                    'message': f' Order initialized successfully!',
+                    'stage': 'init_completed',
+                    'order_summary': {
+                        'items': session.cart.total_items,
+                        'total': session.cart.total_value,
+                        'delivery': delivery_address,
+                        'payment': payment_method.upper()
+                    },
+                    'init_data': result,
+                    'next_step': 'confirm_order'
+                }
+            else:
+                error_msg = result.get('message', 'Failed to initialize order') if result else 'INIT API failed'
+                return {
+                    'success': False,
+                    'message': f' {error_msg}'
+                }
+                
+        except Exception as e:
+            logger.error(f"INIT operation failed: {e}")
+            return {
+                'success': False,
+                'message': ' Failed to initialize order. Please try again.'
+            }
+    
+    async def create_payment(self, session: Session, payment_method: str = 'razorpay') -> Dict[str, Any]:
+        """
+        MOCK PAYMENT CREATION - Create mock payment between INIT and CONFIRM
+        
+        This method simulates the Razorpay payment creation step that would normally
+        happen between INIT and CONFIRM in the ONDC flow.
+        
+        Args:
+            session: User session (must be in INIT stage)
+            payment_method: Payment method (default: razorpay)
+            
+        Returns:
+            Mock payment creation response with payment ID
+        """
+        # Validate session is in INIT stage
+        if session.checkout_state.stage != CheckoutStage.INIT:
+            return {
+                'success': False,
+                'message': f' Cannot create payment. Session is in {session.checkout_state.stage.value} stage, expected INIT.'
+            }
+        
+        try:
+            total_amount = session.cart.total_value
+            
+            # MOCK PAYMENT CREATION - Using values from Himira Order Postman Collection
+            if config.payment.mock_mode:
+                logger.info(f"[MOCK PAYMENT CREATION] Creating mock payment for amount: {total_amount}")
+                
+                # Create mock Razorpay order
+                mock_order = mock_payment_service.create_mock_razorpay_order(
+                    amount=total_amount,
+                    currency="INR",
+                    transaction_id=session.checkout_state.transaction_id
+                )
+                
+                # Create mock payment
+                mock_payment = mock_payment_service.create_mock_payment(
+                    amount=total_amount,
+                    currency="INR",
+                    order_id=mock_order["id"]
+                )
+                
+                if config.payment.debug_logs:
+                    logger.info(f"[MOCK PAYMENT CREATION] Order ID: {mock_order['id']}")
+                    logger.info(f"[MOCK PAYMENT CREATION] Payment ID: {mock_payment['razorpayPaymentId']}")
+                    logger.info(f"[MOCK PAYMENT CREATION] Amount: {total_amount} INR")
+                
+                # Update session with payment information
+                session.checkout_state.payment_id = mock_payment['razorpayPaymentId']
+                
+                return {
+                    'success': True,
+                    'message': f' [MOCK] Payment created successfully',
+                    'data': {
+                        'payment_id': mock_payment['razorpayPaymentId'],  # MOCK: From Postman
+                        'order_id': mock_order['id'],  # MOCK: Generated
+                        'amount': total_amount,
+                        'currency': 'INR',
+                        'status': 'created',
+                        '_mock_indicators': {
+                            'payment_mode': 'MOCK_TESTING',
+                            'source': 'himira_postman_collection',
+                            'payment_id': mock_payment['razorpayPaymentId']
+                        }
+                    },
+                    'next_step': 'confirm_order'
+                }
+            else:
+                # Real payment implementation would go here
+                logger.warning("[REAL PAYMENT CREATION] Real payment mode not implemented yet")
+                return {
+                    'success': False,
+                    'message': ' Real payment mode not implemented. Use mock mode for testing.'
+                }
+                
+        except Exception as e:
+            logger.error(f"[CheckoutService] Payment creation failed: {str(e)}")
+            return {
+                'success': False,
+                'message': f' Payment creation failed: {str(e)}'
+            }
+    
+    async def confirm_order(self, session: Session, payment_status: str = 'PENDING') -> Dict[str, Any]:
+        """
+        BIAP-compatible ONDC CONFIRM stage - Finalize the order with payment validation
+        
+        Enhanced with:
+        - BIAP validation (multiple BPP/Provider checks)
+        - Payment status validation
+        - Proper BIAP context factory
+        - Complete order structure matching BIAP patterns
+        
+        Args:
+            session: User session (must be in INIT stage)
+            payment_status: Payment status ('PENDING', 'PAID', 'FAILED')
+            
+        Returns:
+            Final order confirmation with order ID
+        """
+        # Validate session is in INIT stage
+        if session.checkout_state.stage != CheckoutStage.INIT:
+            return {
+                'success': False,
+                'message': ' Please complete delivery and payment details first.'
+            }
+        
+        # Validate required data is present
+        if not session.checkout_state.delivery_info or not session.checkout_state.payment_method:
+            return {
+                'success': False,
+                'message': ' Missing delivery or payment information.'
+            }
+        
+        try:
+            logger.info(f"[CheckoutService] Starting CONFIRM with payment status: {payment_status}")
+            
+            # Step 1: Get enriched items for validation
+            enriched_items = await self.product_enrichment.enrich_cart_items(
+                session.cart.items, session.session_id
+            )
+            
+            # Step 2: BIAP validation - check for multiple BPP/Provider items
+            validation_result = self.validation.validate_order_items(enriched_items, "confirm")
+            if not validation_result.get('success'):
+                return {
+                    'success': False,
+                    'message': f" {validation_result['error']['message']}"
+                }
+            
+            # Step 3: Payment validation - ALL payments require completion (no COD support)
+            payment_method = session.checkout_state.payment_method.lower()
+            
+            # Log payment validation with mock indicators
+            if config.payment.debug_logs:
+                logger.info(f"[PAYMENT VALIDATION] Method: {payment_method}")
+                logger.info(f"[PAYMENT VALIDATION] Status: {payment_status}")
+                logger.info(f"[PAYMENT VALIDATION] Mock mode: {config.payment.mock_mode}")
+            
+            # For mock mode, always accept PAID/PENDING status
+            if config.payment.mock_mode:
+                if payment_status.upper() not in ['PAID', 'CAPTURED', 'SUCCESS', 'PENDING']:
+                    logger.warning(f"[MOCK PAYMENT] Invalid status: {payment_status}")
+                    return {
+                        'success': False,
+                        'message': f' [MOCK] Payment not completed. Status: {payment_status}'
+                    }
+                logger.info(f"[MOCK PAYMENT] Status validated: {payment_status}")
+            else:
+                # For real payments, require completed status
+                if payment_status.upper() not in ['PAID', 'CAPTURED', 'SUCCESS']:
+                    return {
+                        'success': False,
+                        'message': f" Payment not completed. Status: {payment_status}. Please complete payment first."
+                    }
+            
+            # Step 4: Create BIAP-compatible context  
+            context = self.context_factory.create({
+                'action': 'confirm',
+                'transaction_id': session.checkout_state.transaction_id
+            })
+            
+            # Step 5: Get BPP info from validated items
+            bpp_info = self.validation.get_order_bpp_info(enriched_items)
+            if bpp_info:
+                context['bpp_id'] = bpp_info['bpp_id']
+                context['bpp_uri'] = bpp_info['bpp_uri']
+            
+            # Step 6: Transform enriched items to BIAP CONFIRM format
+            confirm_items = []
+            for item in enriched_items:
+                confirm_item = {
+                    'id': item.local_id,
+                    'quantity': {'count': item.quantity}
+                }
+                
+                # Add fulfillment_id if available
+                if item.fulfillment_id:
+                    confirm_item['fulfillment_id'] = item.fulfillment_id
+                
+                confirm_items.append(confirm_item)
+            
+            # Step 7: Create payment object with MOCK values - TESTING ONLY
+            total_amount = session.cart.total_value
+            
+            # MOCK PAYMENT IMPLEMENTATION - Using values from Himira Order Postman Collection
+            if config.payment.mock_mode:
+                logger.info(f"[MOCK PAYMENT] Creating mock payment for amount: {total_amount}")
+                payment_obj = mock_payment_service.create_biap_payment_object(total_amount)
+                
+                if config.payment.debug_logs:
+                    logger.info(f"[MOCK PAYMENT] Payment ID: {payment_obj['razorpayPaymentId']}")
+                    logger.info(f"[MOCK PAYMENT] Settlement basis: {payment_obj['@ondc/org/settlement_basis']}")
+                    logger.info(f"[MOCK PAYMENT] Settlement window: {payment_obj['@ondc/org/settlement_window']}")
+            else:
+                # Real payment implementation (disabled for now)
+                logger.warning("[REAL PAYMENT] Real payment mode not implemented yet")
+                payment_obj = {
+                    'type': 'ON-ORDER',
+                    'collected_by': 'BAP', 
+                    'paid_amount': total_amount,
+                    'paymentMethod': payment_method.upper(),
+                    'status': payment_status.upper()
+                }
+            
+            # Step 8: Create BIAP-compatible CONFIRM request
+            confirm_data = {
+                'context': context,
+                'message': {
+                    'order': {
+                        'id': f"ORDER_{session.checkout_state.transaction_id[:8].upper()}",
+                        'items': confirm_items,
+                        'billing': {
+                            'name': session.checkout_state.delivery_info.name,
+                            'phone': session.checkout_state.delivery_info.phone,
+                            'email': session.checkout_state.delivery_info.email,
+                            'address': {
+                                'name': session.checkout_state.delivery_info.name,
+                                'building': session.checkout_state.delivery_info.address,
+                                'locality': "Area",
+                                'city': session.checkout_state.delivery_info.city,
+                                'state': "Karnataka",  # Should be from delivery info
+                                'country': "IND",
+                                'area_code': session.checkout_state.delivery_info.pincode
+                            }
+                        },
+                        'fulfillments': [{
+                            'id': "1",
+                            'type': 'Delivery',
+                            'end': {
+                                'contact': {
+                                    'phone': session.checkout_state.delivery_info.phone,
+                                    'email': session.checkout_state.delivery_info.email
+                                },
+                                'location': {
+                                    'address': {
+                                        'name': session.checkout_state.delivery_info.name,
+                                        'building': session.checkout_state.delivery_info.address,
+                                        'locality': "Area",
+                                        'city': session.checkout_state.delivery_info.city,
+                                        'state': "Karnataka",
+                                        'country': "IND",
+                                        'area_code': session.checkout_state.delivery_info.pincode
+                                    }
+                                }
+                            },
+                            'customer': {
+                                'person': {
+                                    'name': session.checkout_state.delivery_info.name
+                                }
+                            }
+                        }],
+                        'payment': payment_obj
+                    }
+                },
+                'userId': session.session_id
+            }
+            
+            # Step 9: Call BIAP CONFIRM API - Authentication Required
+            # Get auth token from session - mandatory for order confirmation
+            auth_token = getattr(session, 'auth_token', None)
+            if not auth_token:
+                logger.error("[CheckoutService] Missing auth token - authentication required for order confirmation")
+                return {
+                    'success': False,
+                    'message': ' Authentication required. Please login first using phone_login tool.'
+                }
+            
+            result = await self.buyer_app.confirm_order(confirm_data, auth_token=auth_token)
+            
+            if result and result.get('success', True) and 'error' not in result:
+                # Extract order ID from response
+                order_id = result.get('order_id') or self._generate_order_id()
+                session.checkout_state.order_id = order_id
+                
+                # Update session to CONFIRMED stage
+                session.checkout_state.stage = CheckoutStage.CONFIRMED
+                session.add_to_history('confirm_order', {
+                    'order_id': order_id,
+                    'total': session.cart.total_value
+                })
+                
+                # Save cart details before clearing
+                cart_items = list(session.cart.items)
+                total_value = session.cart.total_value
+                delivery_address = session.checkout_state.delivery_info.address
+                phone = session.checkout_state.delivery_info.phone
+                
+                # Clear cart after successful order
+                session.cart.clear()
+                
+                return {
+                    'success': True,
+                    'message': f' Order confirmed successfully!',
+                    'order_id': order_id,
+                    'order_details': {
+                        'order_id': order_id,
+                        'items': len(cart_items),
+                        'total': total_value,
+                        'delivery_address': delivery_address,
+                        'payment_method': session.checkout_state.payment_method.upper(),
+                        'phone': phone
+                    },
+                    'confirm_data': result,
+                    'next_actions': ['track_order', 'search_products']
+                }
+            else:
+                error_msg = result.get('message', 'Failed to confirm order') if result else 'CONFIRM API failed'
+                return {
+                    'success': False,
+                    'message': f' {error_msg}'
+                }
+                
+        except Exception as e:
+            logger.error(f"CONFIRM operation failed: {e}")
+            return {
+                'success': False,
+                'message': ' Failed to confirm order. Please try again.'
+            }
+    
+    async def set_delivery_info(self, session: Session, address: str, 
+                               phone: str, email: str, **kwargs) -> Dict[str, Any]:
+        """
+        Store delivery information in session - Himira compliant
+        
+        Args:
+            session: User session
+            address: Full delivery address
+            phone: Contact phone number
+            email: Contact email
+            **kwargs: Additional fields like city, state, pincode
+            
+        Returns:
+            Success response with next steps
+        """
+        try:
+            # Create DeliveryInfo object (note: DeliveryInfo doesn't have state field)
+            delivery_info = DeliveryInfo(
+                address=address,
+                phone=phone,
+                email=email,
+                city=kwargs.get('city', ''),
+                pincode=kwargs.get('pincode', ''),
+                name=kwargs.get('name', kwargs.get('customer_name', ''))
+            )
+            
+            # Store in session checkout state
+            session.checkout_state.delivery_info = delivery_info
+            
+            # Also store state separately since DeliveryInfo doesn't have it
+            if kwargs.get('state'):
+                if not hasattr(session, 'delivery_state'):
+                    session.delivery_state = kwargs.get('state')
+            
+            # Also store customer info if name provided
+            if kwargs.get('name'):
+                session.customer_info = {
+                    'name': kwargs.get('name'),
+                    'phone': phone,
+                    'email': email,
+                    'address': address
+                }
+            
+            logger.info(f"[CheckoutService] Delivery info saved for session {session.session_id}")
+            logger.debug(f"[CheckoutService] Delivery details: {delivery_info}")
+            
+            return {
+                'success': True,
+                'message': f""" **Delivery Details Saved!**
+                
+ **Address:** {address}
+ **Phone:** {phone}
+ **Email:** {email}
+
+ **Next Step:** Getting delivery quotes for your location...""",
+                'next_step': 'select_items_for_order',
+                'delivery_info': {
+                    'address': address,
+                    'phone': phone,
+                    'email': email,
+                    'city': kwargs.get('city'),
+                    'state': kwargs.get('state'),
+                    'pincode': kwargs.get('pincode')
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"[CheckoutService] Failed to set delivery info: {e}")
+            return {
+                'success': False,
+                'message': f' Failed to save delivery details: {str(e)}'
+            }
+    
+    def _generate_transaction_id(self) -> str:
+        """Generate unique transaction ID"""
+        return f"txn_{uuid.uuid4().hex[:12]}"
+    
+    def _generate_order_id(self) -> str:
+        """Generate unique order ID"""
+        return f"ORD{uuid.uuid4().hex[:8].upper()}"
+
+
+# Singleton instance
+_checkout_service: Optional[CheckoutService] = None
+
+
+def get_checkout_service() -> CheckoutService:
+    """Get singleton CheckoutService instance"""
+    global _checkout_service
+    if _checkout_service is None:
+        _checkout_service = CheckoutService()
+    return _checkout_service

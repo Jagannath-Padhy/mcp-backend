@@ -1,0 +1,434 @@
+{
+	"info": {
+		"name": "ONDC MCP Backend",
+		"description": "API collection for testing ONDC MCP Backend with AI assistance",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Health & Status",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						}
+					}
+				},
+				{
+					"name": "API Info",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/",
+							"host": ["{{base_url}}"],
+							"path": [""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Session Management",
+			"item": [
+				{
+					"name": "Create Session",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"pm.environment.set('session_id', jsonData.session_id);",
+									"pm.environment.set('device_id', jsonData.device_id);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"device_id\": \"postman-test-device\",\n  \"metadata\": {\n    \"source\": \"postman\",\n    \"test\": true\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/sessions",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "sessions"]
+						}
+					}
+				},
+				{
+					"name": "Get Session",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/sessions/{{session_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "sessions", "{{session_id}}"]
+						}
+					}
+				},
+				{
+					"name": "Delete Session",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/sessions/{{session_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "sessions", "{{session_id}}"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Chat & AI",
+			"item": [
+				{
+					"name": "Chat - Start Shopping",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"I want to start shopping for organic rice\",\n  \"session_id\": \"{{session_id}}\",\n  \"device_id\": \"{{device_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/chat",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "chat"]
+						}
+					}
+				},
+				{
+					"name": "Chat - Product Query",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"Show me products under 200 rupees\",\n  \"session_id\": \"{{session_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/chat",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "chat"]
+						}
+					}
+				},
+				{
+					"name": "Chat - Add to Cart",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"Add 2kg of organic rice to my cart\",\n  \"session_id\": \"{{session_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/chat",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "chat"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Conversational Journey (Claude Tested)",
+			"item": [
+				{
+					"name": "Journey 1: Create Session",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"pm.environment.set('journey_session_id', jsonData.session_id);",
+									"pm.environment.set('journey_device_id', jsonData.device_id);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"device_id\": \"claude-journey-device\",\n  \"metadata\": {\n    \"source\": \"claude_conversational_test\",\n    \"journey\": \"shopping_flow\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/sessions",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "sessions"]
+						}
+					}
+				},
+				{
+					"name": "Journey 2: Start Shopping Intent",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"I want to start shopping for organic rice\",\n  \"session_id\": \"{{journey_session_id}}\",\n  \"device_id\": \"{{journey_device_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/chat",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "chat"]
+						}
+					}
+				},
+				{
+					"name": "Journey 3: Product Search Query",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"Search for rice products under 200 rupees\",\n  \"session_id\": \"{{journey_session_id}}\",\n  \"device_id\": \"{{journey_device_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/chat",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "chat"]
+						}
+					}
+				},
+				{
+					"name": "Journey 4: Add to Cart Request",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"Add 2kg of organic basmati rice to my cart\",\n  \"session_id\": \"{{journey_session_id}}\",\n  \"device_id\": \"{{journey_device_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/chat",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "chat"]
+						}
+					}
+				},
+				{
+					"name": "Journey 5: View Cart Status",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"Show me my current cart\",\n  \"session_id\": \"{{journey_session_id}}\",\n  \"device_id\": \"{{journey_device_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/chat",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "chat"]
+						}
+					}
+				},
+				{
+					"name": "Journey 6: Price Comparison",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"Compare prices of different rice brands available\",\n  \"session_id\": \"{{journey_session_id}}\",\n  \"device_id\": \"{{journey_device_id}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/chat",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "chat"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Search",
+			"item": [
+				{
+					"name": "Search Products",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"organic rice\",\n  \"filters\": {\n    \"category\": \"Groceries\",\n    \"price_max\": 500\n  },\n  \"limit\": 10\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/search",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "search"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Cart Management",
+			"item": [
+				{
+					"name": "Add to Cart",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"add\",\n  \"item\": {\n    \"product_id\": \"prod_123\",\n    \"name\": \"Organic Basmati Rice\",\n    \"price\": 250\n  },\n  \"quantity\": 2\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/cart/{{device_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "cart", "{{device_id}}"]
+						}
+					}
+				},
+				{
+					"name": "View Cart",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"view\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/cart/{{device_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "cart", "{{device_id}}"]
+						}
+					}
+				},
+				{
+					"name": "Remove from Cart",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"action\": \"remove\",\n  \"item\": {\n    \"product_id\": \"prod_123\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/cart/{{device_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "cart", "{{device_id}}"]
+						}
+					}
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8001",
+			"type": "string"
+		},
+		{
+			"key": "session_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "device_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "journey_session_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "journey_device_id",
+			"value": "",
+			"type": "string"
+		}
+	]
+}

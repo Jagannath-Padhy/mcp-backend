@@ -1,0 +1,26 @@
+# Core dependencies
+httpx>=0.24.0
+python-dotenv>=1.0.0
+aiohttp>=3.9.0
+aiohttp-cors>=0.7.0
+aiohttp-sse>=2.1.0
+
+# Official MCP SDK (requires Python 3.10+)
+mcp>=1.14.0
+
+# Starlette/FastAPI for better SSE support
+starlette>=0.32.0
+uvicorn>=0.24.0
+
+# Image processing
+Pillow>=10.1.0
+
+# Vector search (optional but recommended)
+qdrant-client==1.7.3
+google-generativeai>=0.3.2
+
+# Firebase Authentication - REQUIRED for real SMS OTP
+firebase-admin>=6.2.0
+
+# Utilities
+aiofiles>=23.2.1

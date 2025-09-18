@@ -1,0 +1,168 @@
+# Vector Search Configuration
+vector_search:
+  # Database connection
+  qdrant:
+    host: "${QDRANT_HOST:-localhost}"
+    port: "${QDRANT_PORT:-6333}"
+    timeout: 30
+    connection_pool_size: 10
+    
+  # Embedding configuration  
+  embeddings:
+    provider: "gemini"
+    model: "models/text-embedding-004"
+    api_key: "${GEMINI_API_KEY}"
+    dimensions: 768
+      
+  # Search configuration
+  search:
+    # Default search parameters
+    default_limit: 20
+    max_limit: 100
+    similarity_threshold: 0.7
+    
+    # Search modes
+    hybrid:
+      enabled: true
+      vector_weight: 0.7
+      keyword_weight: 0.3
+      
+    reranking:
+      enabled: true
+      model: "cross-encoder"
+      top_k: 50  # Rerank top 50 results
+      
+    # Filter configurations
+    filters:
+      price:
+        type: "range"
+        enabled: true
+      category:
+        type: "exact_match"
+        enabled: true
+      location:
+        type: "geo_radius"
+        enabled: true
+        max_radius_km: 50
+      availability:
+        type: "boolean"
+        enabled: true
+        default: true
+      rating:
+        type: "range"
+        enabled: true
+        min_value: 0
+        max_value: 5
+
+# Collection-specific search settings        
+collections:
+  products:
+    # Product search configuration
+    search_fields:
+      primary: ["name", "description"]
+      secondary: ["category", "brand", "tags"]
+      metadata: ["provider_name", "location_name"]
+      
+    ranking:
+      # Ranking factors with weights
+      popularity: 0.2
+      rating: 0.3
+      price_competitiveness: 0.2
+      availability: 0.3
+      
+    facets:
+      - field: "category"
+        type: "terms"
+        size: 20
+      - field: "brand"
+        type: "terms" 
+        size: 10
+      - field: "price_range"
+        type: "histogram"
+        interval: 100
+      - field: "rating"
+        type: "histogram"
+        interval: 0.5
+        
+  categories:
+    # Category search configuration
+    search_fields:
+      primary: ["name", "description"]
+      secondary: ["parent_category", "keywords"]
+      
+    hierarchy:
+      enabled: true
+      max_depth: 5
+      include_children: true
+      
+  providers:
+    # Provider search configuration
+    search_fields:
+      primary: ["name", "description"]
+      secondary: ["specialties", "location_name"]
+      
+    location:
+      geo_search: true
+      default_radius_km: 10
+      max_radius_km: 100
+
+# Performance optimization
+performance:
+  # Query optimization
+  query:
+    explain: false  # Enable in development
+    timeout_ms: 5000
+    
+  # Caching strategies
+  cache:
+    query_cache:
+      enabled: true
+      ttl: 300  # 5 minutes
+      max_size: 1000
+      
+    result_cache:
+      enabled: true
+      ttl: 600  # 10 minutes
+      max_size: 500
+      
+  # Connection pooling
+  connections:
+    pool_size: 10
+    max_retries: 3
+    retry_delay_ms: 100
+    
+# Analytics and monitoring
+analytics:
+  # Query analytics
+  track_queries: true
+  track_results: true
+  track_user_interactions: false  # Privacy-focused
+  
+  # Performance metrics
+  metrics:
+    enabled: true
+    include_timing: true
+    include_result_stats: true
+    
+  # Search insights
+  insights:
+    popular_queries: true
+    zero_result_queries: true
+    slow_queries: true
+    threshold_ms: 1000
+
+# A/B testing configuration
+experiments:
+  enabled: false
+  
+  # Search algorithm variants
+  variants:
+    - name: "semantic_heavy"
+      vector_weight: 0.8
+      keyword_weight: 0.2
+      traffic_percentage: 50
+      
+    - name: "balanced"
+      vector_weight: 0.6
+      keyword_weight: 0.4
+      traffic_percentage: 50

@@ -1,0 +1,158 @@
+# ETL Pipeline Configuration
+etl:
+  # Pipeline settings
+  name: "Himira ONDC Catalog ETL"
+  version: "1.0.0"
+  
+  # Processing configuration
+  batch_size: 100
+  max_workers: 4
+  retry_attempts: 3
+  timeout_seconds: 300
+  
+  # Scheduling
+  schedule:
+    # Cron expression for periodic updates
+    full_sync: "0 2 * * *"    # Daily at 2 AM
+    incremental: "0 */2 * * *" # Every 2 hours
+    
+  # Data sources
+  sources:
+    himira_api:
+      enabled: true
+      priority: 1
+      base_url: "https://hp-buyer-backend-preprod.himira.co.in/clientApis"
+      endpoints:
+        search: "/v2/search/{user_id}"
+        categories: "/v2/categories"
+        providers: "/v2/providers"
+      rate_limit:
+        requests_per_second: 10
+        burst: 20
+      retry:
+        max_attempts: 3
+        backoff_factor: 2
+        
+    ondc_protocol:
+      enabled: false  # For learning/development
+      priority: 2
+      base_url: "${ONDC_PROTOCOL_URL}"
+      endpoints:
+        search: "/protocol/items"
+        providers: "/protocol/providers"
+      authentication:
+        type: "api_key"
+        header: "Authorization"
+        
+    file_system:
+      enabled: true
+      priority: 3
+      path: "/app/data"
+      formats: ["json", "csv"]
+      watch_for_changes: true
+
+# Data transformation settings
+transformers:
+  embeddings:
+    provider: "gemini"
+    model: "models/text-embedding-004"
+    dimensions: 768
+    batch_size: 10
+    fields_to_embed:
+      - "name"
+      - "description" 
+      - "category"
+      - "tags"
+      
+  normalization:
+    price:
+      currency_conversion: true
+      default_currency: "INR"
+    location:
+      geocoding: true
+      default_country: "India"
+    text:
+      language_detection: true
+      translation: false  # Disable for now
+      
+  enrichment:
+    add_search_metadata: true
+    generate_keywords: true
+    extract_features: true
+    sentiment_analysis: false
+
+# Data loading settings  
+loaders:
+  qdrant:
+    host: "${QDRANT_HOST:-localhost}"
+    port: "${QDRANT_PORT:-6333}"
+    collections:
+      products:
+        name: "ondc_products"  # Match MCP server expectation
+        vector_size: 768
+        distance: "Cosine"
+        create_if_not_exists: true
+        overwrite_on_recreate: false
+        
+      categories:
+        name: "ondc_categories"  # Unified naming
+        vector_size: 768
+        distance: "Cosine"
+        create_if_not_exists: true
+        
+      providers:
+        name: "ondc_providers"  # Unified naming
+        vector_size: 768
+        distance: "Cosine"
+        create_if_not_exists: true
+        
+    batch_settings:
+      batch_size: 100
+      parallel_batches: 2
+      wait_between_batches: 1  # seconds
+      
+# Monitoring and logging
+monitoring:
+  enabled: true
+  metrics:
+    - "extraction_rate"
+    - "transformation_time"
+    - "loading_success_rate"
+    - "data_quality_score"
+    - "vector_similarity_distribution"
+    
+  alerts:
+    - condition: "extraction_rate < 100"
+      action: "email"
+      threshold: 5  # minutes
+    - condition: "data_quality_score < 0.8"
+      action: "slack"
+      
+  logging:
+    level: "${LOG_LEVEL:-INFO}"
+    format: "json"
+    file: "/app/logs/etl.log"
+    rotation: "daily"
+    retention_days: 30
+
+# Data quality checks
+quality:
+  validation_rules:
+    - field: "price"
+      rule: "price > 0"
+      action: "skip"
+    - field: "name"
+      rule: "length > 3"
+      action: "flag"
+    - field: "embedding"
+      rule: "not_null"
+      action: "regenerate"
+      
+  sampling:
+    enabled: true
+    sample_rate: 0.01  # 1% of data
+    
+  profiling:
+    enabled: true
+    include_correlations: false
+    max_categorical_values: 50
