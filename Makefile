@@ -1,16 +1,18 @@
-.PHONY: help build up down restart logs init clean test
+.PHONY: help build up down restart logs init clean test setup quickstart
 
 help:
 	@echo "ONDC MCP Backend - Make Commands"
 	@echo ""
-	@echo "  make build    - Build all Docker images"
-	@echo "  make up       - Start all services"
-	@echo "  make down     - Stop all services"
-	@echo "  make restart  - Restart all services"
-	@echo "  make logs     - Show logs from all services"
-	@echo "  make init     - Initialize with sample data"
-	@echo "  make clean    - Clean up volumes and data"
-	@echo "  make test     - Test the API endpoints"
+	@echo "  make quickstart - One-command setup for new users"
+	@echo "  make setup     - Interactive setup wizard"
+	@echo "  make build     - Build all Docker images"
+	@echo "  make up        - Start all services"
+	@echo "  make down      - Stop all services"
+	@echo "  make restart   - Restart all services"
+	@echo "  make logs      - Show logs from all services"
+	@echo "  make init      - Initialize with sample data"
+	@echo "  make clean     - Clean up volumes and data"
+	@echo "  make test      - Test the API endpoints"
 
 build:
 	@echo "Building Docker images..."
@@ -94,3 +96,37 @@ rebuild:
 	docker-compose build --no-cache
 	docker-compose up -d
 	@echo "✅ Rebuild complete"
+
+setup:
+	@echo "Running interactive setup..."
+	@bash setup.sh
+
+quickstart:
+	@echo "🚀 Quick Start - Setting up ONDC MCP Backend"
+	@echo ""
+	@if [ ! -f .env ]; then \
+		echo "Creating .env file from template..."; \
+		cp .env.example .env; \
+		echo "⚠️  Please edit .env file and add your API keys:"; \
+		echo "   - GEMINI_API_KEY (get from https://makersuite.google.com/app/apikey)"; \
+		echo "   - WIL_API_KEY (contact Himira for access)"; \
+		echo ""; \
+		echo "Then run 'make quickstart' again."; \
+		exit 1; \
+	fi
+	@echo "✅ Configuration found"
+	@echo "📦 Building Docker images..."
+	@docker-compose build
+	@echo "🚀 Starting services..."
+	@docker-compose up -d
+	@echo "⏳ Waiting for services to be healthy..."
+	@sleep 15
+	@echo "📊 Loading initial data..."
+	@docker-compose up -d etl
+	@sleep 5
+	@echo ""
+	@echo "✅ Setup complete! Services running at:"
+	@echo "   • API: http://localhost:8001"
+	@echo "   • Qdrant: http://localhost:6333"
+	@echo ""
+	@echo "Test with: curl http://localhost:8001/health"

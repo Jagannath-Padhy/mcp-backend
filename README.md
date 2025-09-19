@@ -2,6 +2,40 @@
 
 🛍️ Production-ready ONDC shopping backend with Model Context Protocol (MCP) integration for AI-powered conversational commerce.
 
+## 🚀 Quick Start (5 minutes)
+
+Get the entire system running with just a few commands:
+
+```bash
+# Clone the repository
+git clone https://github.com/your-org/mcp-backend.git
+cd mcp-backend
+
+# Option 1: Interactive setup (recommended for first-time users)
+make setup
+
+# Option 2: Quick start (if you have API keys ready)
+cp .env.example .env
+# Edit .env and add your GEMINI_API_KEY and WIL_API_KEY
+make quickstart
+
+# Test the installation
+curl http://localhost:8001/health
+```
+
+That's it! The system is now running with:
+- ✅ API Server at http://localhost:8001
+- ✅ Vector search with Qdrant
+- ✅ 94 products loaded and indexed
+- ✅ Guest shopping enabled
+
+### Prerequisites
+
+You only need:
+1. **Docker & Docker Compose** installed
+2. **Gemini API Key** - [Get it free here](https://makersuite.google.com/app/apikey)
+3. **Himira API Key** - Contact Himira or use test credentials
+
 ## 🏗️ Architecture Overview
 
 This backend implements a complete ONDC (Open Network for Digital Commerce) shopping solution with AI assistance capabilities through MCP tools. It enables conversational shopping experiences where users can search, browse, add to cart, and complete purchases through natural language interactions.

@@ -62,7 +62,8 @@ services:
       dockerfile: ./etl/Dockerfile
     container_name: mcp-etl
     depends_on:
-      - qdrant
+      qdrant:
+        condition: service_healthy
     env_file:
       - ./.env  # Use repo-local .env file
     environment:
@@ -77,9 +78,10 @@ services:
       # Gemini API key for embeddings
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       # Qdrant collection name
-      - QDRANT_PRODUCTS_COLLECTION=himira_products
+      - QDRANT_COLLECTION=himira_products
       # ETL settings
       - ETL_ENV=production
+      - ETL_MODE=init
       - LOG_LEVEL=INFO
     volumes:
       - ./data/etl:/app/data
