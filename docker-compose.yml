@@ -61,9 +61,6 @@ services:
       context: ./
       dockerfile: ./etl/Dockerfile
     container_name: mcp-etl
-    depends_on:
-      qdrant:
-        condition: service_healthy
     env_file:
       - ./.env  # Use repo-local .env file
     environment:
