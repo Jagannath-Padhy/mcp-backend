@@ -25,6 +25,7 @@ curl http://localhost:8001/health
 
 That's it! The system is now running with:
 - ✅ API Server at http://localhost:8001
+- ✅ Supervisor Web Interface at http://localhost:9001 (admin:supervisor2024)
 - ✅ Vector search with Qdrant
 - ✅ 94 products loaded and indexed
 - ✅ Guest shopping enabled

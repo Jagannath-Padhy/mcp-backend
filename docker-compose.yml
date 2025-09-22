@@ -28,6 +28,7 @@ services:
       - qdrant
     ports:
       - "8001:8001"  # API port for frontend
+      - "9001:9001"  # Supervisord web interface
     env_file:
       - ./.env  # Use repo-local .env file
     environment:
@@ -40,6 +41,11 @@ services:
       # Guest User Configuration
       - GUEST_USER_ID=guestUser
       - GUEST_DEVICE_ID=d58dc5e2119ae5430b9321602618c878
+      # Supervisor Web Interface Configuration
+      - SUPERVISOR_WEB_ENABLED=${SUPERVISOR_WEB_ENABLED:-true}
+      - SUPERVISOR_WEB_PORT=${SUPERVISOR_WEB_PORT:-9001}
+      - SUPERVISOR_WEB_USERNAME=${SUPERVISOR_WEB_USERNAME:-admin}
+      - SUPERVISOR_WEB_PASSWORD=${SUPERVISOR_WEB_PASSWORD:-supervisor2024}
     volumes:
       - ./data/sessions:/app/sessions
       - ./backend/api:/app/api:ro
