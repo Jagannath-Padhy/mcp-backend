@@ -41,6 +41,7 @@ IMPORTANT:
 
 import asyncio
 import logging
+import time
 from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass
 import json
@@ -118,8 +119,10 @@ from .adapters.profile import (
 # Import existing configuration and logging
 from .config import config
 from .utils import setup_mcp_logging, get_logger
+from .utils.logger import get_mcp_operations_logger
 
 logger = get_logger(__name__)
+mcp_ops_logger = get_mcp_operations_logger()
 
 # Initialize FastMCP server with official SDK
 mcp = FastMCP("ondc-shopping")
@@ -203,11 +206,24 @@ def extract_session_from_context(ctx: Context, **kwargs) -> Optional[str]:
         return default_session_id
 
 async def handle_tool_execution(tool_name: str, adapter_func, ctx: Context, **kwargs):
-    """Generic handler for tool execution with proper session management"""
+    """Generic handler for tool execution with comprehensive request/response logging"""
+    session_id = None
+    start_time = time.time()
+    backend_calls = []
+    
     try:
         # Extract session ID using biap-client patterns
         session_id = extract_session_from_context(ctx, **kwargs)
         
+        # Log comprehensive request information
+        request_data = {
+            "tool": tool_name,
+            "session_id": session_id,
+            "parameters": kwargs.copy()
+        }
+        mcp_ops_logger.log_tool_request(tool_name, session_id, request_data)
+        
+        # Basic logging (keep existing for backward compatibility)
         logger.info(f"[{tool_name}] Executing with session: {session_id}")
         logger.debug(f"[{tool_name}] Parameters: {json.dumps(kwargs, indent=2, default=str)}")
         
@@ -217,8 +233,25 @@ async def handle_tool_execution(tool_name: str, adapter_func, ctx: Context, **kw
         # Execute the adapter function
         result = await adapter_func(**kwargs)
         
-        # Log successful execution
-        logger.info(f"[{tool_name}] Execution successful")
+        # Calculate execution time
+        execution_time_ms = (time.time() - start_time) * 1000
+        
+        # Extract result data for logging
+        if isinstance(result, dict):
+            result_data = result
+        else:
+            try:
+                result_data = json.loads(result) if isinstance(result, str) else {"result": str(result)}
+            except:
+                result_data = {"result": str(result)}
+        
+        # Log comprehensive response
+        mcp_ops_logger.log_tool_response(
+            tool_name, session_id, result_data, execution_time_ms, backend_calls, "success"
+        )
+        
+        # Basic logging (keep existing for backward compatibility)
+        logger.info(f"[{tool_name}] Execution successful in {execution_time_ms:.2f}ms")
         
         # Return formatted result
         if isinstance(result, dict):
@@ -227,12 +260,22 @@ async def handle_tool_execution(tool_name: str, adapter_func, ctx: Context, **kw
             return str(result)
             
     except Exception as e:
+        # Calculate execution time for error case
+        execution_time_ms = (time.time() - start_time) * 1000
+        
+        # Log comprehensive error
+        if session_id:
+            mcp_ops_logger.log_tool_error(tool_name, session_id, e, execution_time_ms)
+        
+        # Basic error logging (keep existing for backward compatibility)
         error_msg = f"Error in {tool_name}: {str(e)}"
-        logger.error(f"[{tool_name}] {error_msg}", exc_info=True)
+        logger.error(f"[{tool_name}] {error_msg} (after {execution_time_ms:.2f}ms)", exc_info=True)
+        
         return json.dumps({
             "success": False,
             "error": error_msg,
-            "session_id": session_id if 'session_id' in locals() else None
+            "session_id": session_id,
+            "execution_time_ms": execution_time_ms
         }, indent=2)
 
 # ============================================================================
