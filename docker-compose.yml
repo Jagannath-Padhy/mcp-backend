@@ -42,7 +42,7 @@ services:
       - GUEST_DEVICE_ID=d58dc5e2119ae5430b9321602618c878
     volumes:
       - ./data/sessions:/app/sessions
-      - ./backend/api/config:/app/api/config:ro
+      - ./backend/api:/app/api:ro
       - ./backend/logs:/app/logs
       - ./backend/ondc-shopping-mcp:/app/ondc-shopping-mcp:ro
     networks:

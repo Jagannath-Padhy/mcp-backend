@@ -22,7 +22,7 @@ mcp:
         QDRANT_HOST: qdrant
         QDRANT_PORT: "6333"
         QDRANT_COLLECTION: himira_products
-        VECTOR_SIMILARITY_THRESHOLD: "0.7"
+        VECTOR_SIMILARITY_THRESHOLD: "0.3"
         VECTOR_MAX_RESULTS: "20"
         
         # Session Management

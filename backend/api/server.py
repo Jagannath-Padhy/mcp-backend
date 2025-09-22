@@ -6,15 +6,14 @@ FastAPI server with MCP-Agent integration for frontend applications
 
 import os
 import uuid
-import asyncio
+import json
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -38,6 +37,66 @@ agent = None
 llm = None
 sessions = {}  # In-memory session storage (use Redis/MongoDB in production)
 session_llms = {}  # Session-specific LLM instances with conversation history
+
+# ============================================================================
+# Helper Functions for DRY Code
+# ============================================================================
+
+def generate_device_id() -> str:
+    """Generate a unique device ID."""
+    return f"device_{uuid.uuid4().hex[:8]}"
+
+def generate_session_id() -> str:
+    """Generate a unique session ID."""
+    return f"session_{uuid.uuid4().hex}"
+
+def create_or_update_session(session_id: str, device_id: str, metadata: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Create a new session or update existing one."""
+    if session_id not in sessions:
+        sessions[session_id] = {
+            "session_id": session_id,
+            "device_id": device_id,
+            "created_at": datetime.now(),
+            "last_activity": datetime.now(),
+            "metadata": metadata or {}
+        }
+    else:
+        sessions[session_id]["last_activity"] = datetime.now()
+        if metadata:
+            sessions[session_id]["metadata"].update(metadata)
+    return sessions[session_id]
+
+def check_agent_ready():
+    """Check if agent is ready and raise appropriate error."""
+    if not agent:
+        raise HTTPException(status_code=503, detail="Agent not ready")
+    if not llm:
+        raise HTTPException(status_code=503, detail="LLM not ready")
+
+def determine_context_type(tool_result: Dict[str, Any]) -> tuple[str, bool]:
+    """Determine context type and action requirement from tool result.
+    
+    Returns:
+        tuple: (context_type, action_required)
+    """
+    if not isinstance(tool_result, dict):
+        return None, False
+    
+    # Check for known data patterns
+    for key in tool_result:
+        match key:
+            case 'products':
+                return 'products', False
+            case 'cart' | 'cart_summary':
+                return 'cart', False
+            case 'order_id' | 'order_details':
+                return 'order', False
+            case 'quote_data' | 'delivery':
+                return 'checkout', True
+            case 'next_step' | 'stage':
+                return 'checkout', True
+    
+    return None, False
 
 async def get_session_llm(session_id: str):
     """Get or create a session-specific LLM with conversation history"""
@@ -72,20 +131,33 @@ async def lifespan(app: FastAPI):
             agent = Agent(
                 name="shopping_assistant",
                 instruction="""You are an intelligent ONDC shopping assistant operating in GUEST MODE.
-
 Guest Configuration:
 - userId: guestUser
 - deviceId: provided by user or auto-generated
 
 Order Journey Flow (complete up to on_init):
 1. initialize_shopping → Create guest session
-2. search_products → Find products  
-3. add_to_cart → Add to cart (auto-detects from search)
+2. search_products → Search for products
+3. add_to_cart → Add items to cart
 4. view_cart → Show cart contents
 5. select_items_for_order → Get delivery quotes (needs city, state, pincode)
 6. initialize_order → Set customer details (name, address, phone, email)
 7. create_payment → [MOCK] Create test payment
 8. confirm_order → [MOCK] Confirm with mock payment
+
+SEARCH PATTERNS - Always use search_products for ANY mention of products:
+- "search for X" 
+- "find X"  
+- "looking for X"
+- "I need X"
+- "show me X"
+- "get X"
+- "X products"
+- "buy X"
+- "shop for X"
+- "X" (any product name, including plural forms like "jams", "apples", "oils")
+- ANY food, grocery, or merchandise query
+- When user mentions any product name, ALWAYS use search_products
 
 IMPORTANT:
 - Never ask for login/authentication
@@ -95,8 +167,8 @@ IMPORTANT:
 - Use tools proactively to help users
 
 Always use the appropriate tool based on user intent.
-For natural language like 'show me rice products', use search_products.
-For 'add to cart', use add_to_cart with auto-detection.
+
+For 'add to cart', use add_to_cart.
 For 'checkout', start with select_items_for_order.""",
                 server_names=["ondc-shopping"]  # Connects to our MCP server
             )
@@ -153,6 +225,9 @@ class ChatResponse(BaseModel):
     session_id: str
     device_id: str
     timestamp: datetime
+    data: Optional[Any] = None  # Structured data from tool results
+    context_type: Optional[str] = None  # Type of data (products/cart/order/checkout)
+    action_required: Optional[bool] = False  # If user action is needed
 
 class SessionCreateRequest(BaseModel):
     device_id: Optional[str] = None
@@ -192,18 +267,10 @@ async def health_check(request: Request):
 @limiter.limit("10/minute")
 async def create_session(request: Request, session_req: SessionCreateRequest):
     """Create a new shopping session"""
-    session_id = f"session_{uuid.uuid4().hex}"
-    device_id = session_req.device_id or f"device_{uuid.uuid4().hex[:8]}"
+    session_id = generate_session_id()
+    device_id = session_req.device_id or generate_device_id()
     
-    session = {
-        "session_id": session_id,
-        "device_id": device_id,
-        "created_at": datetime.now(),
-        "last_activity": datetime.now(),
-        "metadata": session_req.metadata
-    }
-    
-    sessions[session_id] = session
+    session = create_or_update_session(session_id, device_id, session_req.metadata)
     logger.info(f"Created session: {session_id}")
     
     return SessionResponse(**session)
@@ -239,24 +306,14 @@ async def delete_session(request: Request, session_id: str):
 async def chat(request: Request, chat_req: ChatRequest):
     """Chat with the shopping assistant"""
     
-    if not agent:
-        raise HTTPException(status_code=503, detail="Agent not ready")
+    check_agent_ready()
     
     # Generate IDs if not provided
-    device_id = chat_req.device_id or f"device_{uuid.uuid4().hex[:8]}"
-    session_id = chat_req.session_id or f"session_{uuid.uuid4().hex}"
+    device_id = chat_req.device_id or generate_device_id()
+    session_id = chat_req.session_id or generate_session_id()
     
-    # Update session
-    if session_id not in sessions:
-        sessions[session_id] = {
-            "session_id": session_id,
-            "device_id": device_id,
-            "created_at": datetime.now(),
-            "last_activity": datetime.now(),
-            "metadata": {}
-        }
-    else:
-        sessions[session_id]["last_activity"] = datetime.now()
+    # Create or update session
+    create_or_update_session(session_id, device_id)
     
     try:
         # Get session-specific LLM with conversation history
@@ -279,75 +336,37 @@ async def chat(request: Request, chat_req: ChatRequest):
             request_params=request_params
         )
         
-        # Process the response and handle tool calls
+        # Process the response using proper MCP integration
         response_text = ""
+        structured_data = None
+        context_type = None
+        action_required = False
+        
+        # The GoogleAugmentedLLM should handle tool calling automatically
+        # We just need to extract the final response and any structured data
         if contents and len(contents) > 0:
             for content in contents:
                 if content.parts:
                     for part in content.parts:
                         if hasattr(part, 'text') and part.text:
-                            # Check if this is a tool call request
-                            if '```tool_code' in part.text or '"tool_name"' in part.text:
-                                # Extract tool name and parameters
-                                import json
-                                import re
-                                
-                                # Try to parse JSON tool call
-                                try:
-                                    # Extract JSON from tool_code block or direct JSON
-                                    json_match = re.search(r'\{.*"tool_name".*\}', part.text, re.DOTALL)
-                                    if json_match:
-                                        tool_data = json.loads(json_match.group())
-                                        tool_name = tool_data.get('tool_name')
-                                        tool_input = tool_data.get('tool_input', tool_data.get('query', {}))
-                                        
-                                        # Map common tool names to MCP tool names
-                                        tool_mapping = {
-                                            'search': 'search_products',
-                                            'search_products': 'search_products',
-                                            'add_to_cart': 'add_to_cart',
-                                            'view_cart': 'view_cart',
-                                            'init_session': 'init_session'
-                                        }
-                                        
-                                        actual_tool = tool_mapping.get(tool_name, tool_name)
-                                        
-                                        # Call the tool through the agent
-                                        try:
-                                            tool_result = await agent.call_tool(
-                                                server_name="ondc-shopping",
-                                                tool_name=actual_tool,
-                                                arguments=tool_input if isinstance(tool_input, dict) else {"query": tool_input}
-                                            )
-                                            
-                                            # Format the tool result for human consumption
-                                            if tool_result:
-                                                if isinstance(tool_result, dict):
-                                                    if 'products' in tool_result:
-                                                        # Format search results
-                                                        products = tool_result['products']
-                                                        response_text = f"I found {len(products)} products for your search:\\n\\n"
-                                                        for i, product in enumerate(products[:5], 1):  # Show top 5
-                                                            response_text += f"{i}. {product.get('name', 'Unknown')} - ₹{product.get('price', 'N/A')}\\n"
-                                                            if product.get('description'):
-                                                                response_text += f"   {product['description'][:100]}...\\n"
-                                                    elif 'message' in tool_result:
-                                                        response_text = tool_result['message']
-                                                    else:
-                                                        response_text = json.dumps(tool_result, indent=2)
-                                                else:
-                                                    response_text = str(tool_result)
-                                        except Exception as tool_error:
-                                            logger.error(f"Tool execution error: {tool_error}")
-                                            response_text = f"I encountered an error while processing your request: {str(tool_error)}"
-                                        
-                                except json.JSONDecodeError:
-                                    # If not JSON, just use the text as is
-                                    response_text += part.text
-                            else:
-                                response_text += part.text
+                            response_text += part.text
                         elif hasattr(part, 'function_response'):
-                            response_text += str(part.function_response)
+                            # Handle tool execution results if present
+                            if hasattr(part.function_response, 'content'):
+                                try:
+                                    # Parse tool result as JSON if possible
+                                    tool_result = json.loads(part.function_response.content)
+                                    structured_data = tool_result
+                                    
+                                    # Determine context type using helper function
+                                    context_type, action_required = determine_context_type(tool_result)
+                                except (json.JSONDecodeError, AttributeError):
+                                    # If not JSON or no content attribute, just add to response text
+                                    response_text += str(part.function_response)
+        
+        # Clean up response text - remove any "None" prefix
+        if response_text.startswith("None"):
+            response_text = response_text[4:]
         
         response = response_text or "I'm ready to help you with your shopping needs!"
         
@@ -355,7 +374,10 @@ async def chat(request: Request, chat_req: ChatRequest):
             response=response,
             session_id=session_id,
             device_id=device_id,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
+            data=structured_data,
+            context_type=context_type,
+            action_required=action_required
         )
         
     except Exception as e:
@@ -368,8 +390,7 @@ async def chat(request: Request, chat_req: ChatRequest):
 async def search_products(request: Request, search_req: SearchRequest):
     """Hybrid search for products"""
     
-    if not llm:
-        raise HTTPException(status_code=503, detail="Agent not ready")
+    check_agent_ready()
     
     try:
         # Use agent to search with proper tool calling
@@ -377,18 +398,12 @@ async def search_products(request: Request, search_req: SearchRequest):
         if search_req.filters:
             search_prompt += f" with filters: {search_req.filters}"
         
-        request_params = RequestParams(
-            max_iterations=3,
-            use_history=False,  # Don't maintain history for search
-            temperature=0.3
-        )
-        
         # Call search tool directly
         try:
             tool_result = await agent.call_tool(
                 server_name="ondc-shopping",
-                tool_name="search_products",
-                arguments={"search_query": search_req.query}
+                name="search_products",
+                arguments={"query": search_req.query}
             )
             
             # Format search results
@@ -419,8 +434,7 @@ async def search_products(request: Request, search_req: SearchRequest):
 async def manage_cart(request: Request, device_id: str, cart_req: CartRequest):
     """Manage shopping cart"""
     
-    if not llm:
-        raise HTTPException(status_code=503, detail="Agent not ready")
+    check_agent_ready()
     
     try:
         # Use agent for cart management with proper tool calling
@@ -428,33 +442,36 @@ async def manage_cart(request: Request, device_id: str, cart_req: CartRequest):
         if cart_req.item:
             cart_prompt += f" with item: {cart_req.item}"
         
-        request_params = RequestParams(
-            max_iterations=3,
-            use_history=False,
-            temperature=0.3
-        )
-        
-        # Map cart actions to appropriate tools
-        if cart_req.action == "add" and cart_req.item:
-            tool_name = "add_to_cart"
-            arguments = {"item": cart_req.item, "quantity": cart_req.quantity}
-        elif cart_req.action == "view":
-            tool_name = "view_cart"
-            arguments = {"device_id": device_id}
-        else:
-            response = f"Unsupported cart action: {cart_req.action}"
-            return {
-                "device_id": device_id,
-                "action": cart_req.action,
-                "result": response,
-                "timestamp": datetime.now()
-            }
+        # Map cart actions to appropriate tools using match/case
+        match cart_req.action:
+            case "add" if cart_req.item:
+                tool_name = "add_to_cart"
+                arguments = {"item": cart_req.item, "quantity": cart_req.quantity}
+            case "view":
+                tool_name = "view_cart"
+                arguments = {"device_id": device_id}
+            case "remove" if cart_req.item:
+                tool_name = "remove_from_cart"
+                arguments = {"item_id": cart_req.item.get("id", "")}
+            case "update" if cart_req.item:
+                tool_name = "update_cart_quantity"
+                arguments = {"item_id": cart_req.item.get("id", ""), "quantity": cart_req.quantity}
+            case "clear":
+                tool_name = "clear_cart"
+                arguments = {"device_id": device_id}
+            case _:
+                return {
+                    "device_id": device_id,
+                    "action": cart_req.action,
+                    "result": f"Unsupported cart action: {cart_req.action}",
+                    "timestamp": datetime.now()
+                }
         
         # Call the appropriate cart tool
         try:
             tool_result = await agent.call_tool(
                 server_name="ondc-shopping",
-                tool_name=tool_name,
+                name=tool_name,
                 arguments=arguments
             )
             response = str(tool_result) if tool_result else f"Cart {cart_req.action} completed"

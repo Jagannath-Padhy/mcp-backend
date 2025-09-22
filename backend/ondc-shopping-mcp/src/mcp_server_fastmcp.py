@@ -236,6 +236,48 @@ async def handle_tool_execution(tool_name: str, adapter_func, ctx: Context, **kw
         }, indent=2)
 
 # ============================================================================
+# DRY PRINCIPLE: Tool Factory Pattern 
+# ============================================================================
+
+def create_standard_tool(name: str, adapter_func, docstring: str, extra_params: dict = None):
+    """Create a standard MCP tool with common parameters.
+    
+    This factory function reduces code duplication by generating tools
+    with the standard parameters that almost all tools share:
+    - userId (default: guestUser)
+    - deviceId (optional)
+    - session_id (optional)
+    
+    Args:
+        name: Tool name
+        adapter_func: Adapter function to call
+        docstring: Tool documentation
+        extra_params: Additional parameters beyond the standard ones
+    """
+    # Define the standard parameters that all tools have
+    standard_params = {
+        'ctx': 'Context',
+        'userId': 'Optional[str] = "guestUser"',
+        'deviceId': 'Optional[str] = None',
+        'session_id': 'Optional[str] = None'
+    }
+    
+    # Merge with extra params if provided
+    all_params = {**(extra_params or {}), **standard_params}
+    
+    # Create the async function dynamically
+    async def tool_func(**kwargs):
+        ctx = kwargs.pop('ctx')
+        return await handle_tool_execution(name, adapter_func, ctx, **kwargs)
+    
+    # Set function metadata
+    tool_func.__name__ = name
+    tool_func.__doc__ = docstring
+    
+    # Register with MCP
+    return mcp.tool()(tool_func)
+
+# ============================================================================
 # CART OPERATIONS - FastMCP Tools
 # ============================================================================
 
@@ -486,22 +528,8 @@ async def confirm_order(
                                      deviceId=deviceId, session_id=session_id)
 
 # ============================================================================
-# AUTHENTICATION & SESSION MANAGEMENT - FastMCP Tools
+# SESSION MANAGEMENT - FastMCP Tools
 # ============================================================================
-
-# GUEST MODE ONLY - Phone login disabled for pure guest checkout
-# @mcp.tool()
-# async def phone_login(
-#     ctx: Context,
-#     phone_number: str,
-#     otp: Optional[str] = None,
-#     deviceId: Optional[str] = None,
-#     session_id: Optional[str] = None
-# ) -> str:
-#     """Authenticate user with phone number and OTP."""
-#     return await handle_tool_execution("phone_login", auth_adapter, ctx,
-#                                      phone_number=phone_number, otp=otp,
-#                                      deviceId=deviceId, session_id=session_id)
 
 @mcp.tool()
 async def initialize_shopping(

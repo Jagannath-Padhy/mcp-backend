@@ -48,7 +48,7 @@ def generate_config():
                         'QDRANT_HOST': os.getenv('QDRANT_HOST', 'qdrant'),
                         'QDRANT_PORT': os.getenv('QDRANT_PORT', '6333'),
                         'QDRANT_COLLECTION': os.getenv('QDRANT_COLLECTION', 'himira_products'),
-                        'VECTOR_SIMILARITY_THRESHOLD': '0.7',
+                        'VECTOR_SIMILARITY_THRESHOLD': '0.3',
                         'VECTOR_MAX_RESULTS': '20',
                         
                         # Session Management

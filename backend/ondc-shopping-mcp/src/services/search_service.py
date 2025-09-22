@@ -42,6 +42,48 @@ class SearchService:
         except Exception as e:
             logger.warning(f"Failed to initialize vector search: {e}")
     
+    def _extract_price(self, item: Dict[str, Any]) -> float:
+        """Extract price from various item formats."""
+        # Try direct price field
+        if isinstance(item.get("price"), (int, float)):
+            return float(item["price"])
+        elif isinstance(item.get("price"), dict):
+            return float(item["price"].get("value", 0))
+        # Try nested item_details
+        elif item.get("item_details", {}).get("price", {}).get("value"):
+            return float(item["item_details"]["price"]["value"])
+        return 0.0
+    
+    def _extract_category(self, item: Dict[str, Any]) -> str:
+        """Extract category from various item formats."""
+        if isinstance(item.get("category"), dict):
+            return item["category"].get("name", "")
+        elif isinstance(item.get("category"), str):
+            return item["category"]
+        elif item.get("item_details", {}).get("category_id"):
+            return item["item_details"]["category_id"]
+        return ""
+    
+    def _extract_brand(self, item: Dict[str, Any]) -> str:
+        """Extract brand from various item formats."""
+        if item.get("brand"):
+            return str(item["brand"])
+        elif item.get("item_details", {}).get("descriptor", {}).get("brand"):
+            return item["item_details"]["descriptor"]["brand"]
+        elif item.get("provider_details", {}).get("descriptor", {}).get("name"):
+            return item["provider_details"]["descriptor"]["name"]
+        return ""
+    
+    def _matches_category(self, item: Dict[str, Any], category: str) -> bool:
+        """Check if item matches category filter."""
+        item_category = self._extract_category(item)
+        return category.lower() in item_category.lower()
+    
+    def _matches_brand(self, item: Dict[str, Any], brand: str) -> bool:
+        """Check if item matches brand filter."""
+        item_brand = self._extract_brand(item)
+        return brand.lower() in item_brand.lower()
+    
     def _format_api_results(self, api_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Format API results to standard product structure
         
@@ -357,40 +399,15 @@ class SearchService:
             # For debugging - track what we're filtering
             item_name = item.get("name", "Unknown")
             
-            # Category filter
-            if category:
-                item_category = ""
-                if isinstance(item.get("category"), dict):
-                    item_category = item["category"].get("name", "")
-                elif isinstance(item.get("category"), str):
-                    item_category = item["category"]
-                elif item.get("item_details", {}).get("category_id"):
-                    item_category = item["item_details"]["category_id"]
-                    
-                if category.lower() not in item_category.lower():
-                    continue
+            # Apply filters using helper methods
+            if category and not self._matches_category(item, category):
+                continue
             
-            # Brand filter
-            if brand:
-                item_brand = ""
-                if item.get("brand"):
-                    item_brand = item["brand"]
-                elif item.get("item_details", {}).get("descriptor", {}).get("brand"):
-                    item_brand = item["item_details"]["descriptor"]["brand"]
-                    
-                if brand.lower() not in item_brand.lower():
-                    continue
+            if brand and not self._matches_brand(item, brand):
+                continue
             
-            # Price filter
-            if price_min is not None or price_max is not None:
-                item_price = 0
-                if isinstance(item.get("price"), (int, float)):
-                    item_price = float(item["price"])
-                elif isinstance(item.get("price"), dict):
-                    item_price = float(item["price"].get("value", 0))
-                elif item.get("item_details", {}).get("price", {}).get("value"):
-                    item_price = float(item["item_details"]["price"]["value"])
-                    
+            if (price_min is not None or price_max is not None):
+                item_price = self._extract_price(item)
                 if price_min and item_price < price_min:
                     continue
                 if price_max and item_price > price_max:

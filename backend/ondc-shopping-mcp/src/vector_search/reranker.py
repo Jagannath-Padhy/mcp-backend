@@ -322,7 +322,7 @@ class ResultReranker:
         
         # Ensure minimum score for high-quality vector matches
         # If vector search found it with good score, don't filter it out completely
-        vector_score = getattr(item, '_vector_score', 0.0)
+        vector_score = item.get('_vector_score', 0.0)
         if vector_score > 0.5 and total_score < 0.2:
             total_score = max(total_score, 0.3)  # Minimum score for good vector matches
         

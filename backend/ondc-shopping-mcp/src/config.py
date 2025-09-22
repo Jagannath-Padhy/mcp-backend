@@ -120,7 +120,7 @@ class Config:
             port=int(os.getenv("QDRANT_PORT", "6333")),
             collection=os.getenv("QDRANT_COLLECTION", "himira_products"),
             gemini_api_key=os.getenv("GEMINI_API_KEY"),
-            similarity_threshold=float(os.getenv("VECTOR_SIMILARITY_THRESHOLD", "0.7")),
+            similarity_threshold=float(os.getenv("VECTOR_SIMILARITY_THRESHOLD", "0.3")),
             max_results=int(os.getenv("VECTOR_MAX_RESULTS", "20"))
         )
         
