@@ -115,6 +115,19 @@ class BuyerBackendClient:
             logger.info(f"[CURL DEBUG] API Call to {endpoint}")
             logger.info(f"[CURL COMMAND]:\n{curl_cmd}")
             logger.info(f"{'='*80}")
+            
+            # Also write to dedicated curl log file for easier viewing
+            try:
+                curl_log_path = "/app/logs/curl_requests.log"
+                os.makedirs(os.path.dirname(curl_log_path), exist_ok=True)
+                with open(curl_log_path, "a") as f:
+                    from datetime import datetime
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    f.write(f"\n[{timestamp}] {endpoint}\n")
+                    f.write(f"{curl_cmd}\n")
+                    f.write("-" * 80 + "\n")
+            except Exception as e:
+                logger.warning(f"Failed to write to curl log file: {e}")
         
         try:
             async with httpx.AsyncClient(timeout=self.timeout, limits=self.limits) as client:
@@ -425,13 +438,8 @@ class BuyerBackendClient:
     # USER/ACCOUNT APIs
     # ================================
     
-    async def create_guest_user(self, guest_data: Dict) -> Optional[Dict]:
-        """Create guest user"""
-        return await self._make_request("POST", "/create/guest/user", json_data=guest_data)
-    
-    async def guest_user_login(self, login_data: Dict) -> Optional[Dict]:
-        """Guest user login"""
-        return await self._make_request("POST", "/guestUserLogin", json_data=login_data)
+    # REMOVED: Guest user endpoints - No more guest mode
+    # All users must use real Himira credentials
     
     async def signup(self, signup_data: Dict) -> Optional[Dict]:
         """Send OTP for phone registration - matches frontend flow"""
@@ -586,9 +594,13 @@ class BuyerBackendClient:
 _buyer_client: Optional[BuyerBackendClient] = None
 
 
-def get_buyer_backend_client(base_url: str = None, api_key: str = None) -> BuyerBackendClient:
-    """Get singleton BuyerBackendClient instance"""
+def get_buyer_backend_client(base_url: str = None, api_key: str = None, debug_curl: bool = None) -> BuyerBackendClient:
+    """Get singleton BuyerBackendClient instance with debug CURL logging enabled by default"""
     global _buyer_client
     if _buyer_client is None:
-        _buyer_client = BuyerBackendClient(base_url, api_key)
+        # Enable debug CURL logging by default for troubleshooting
+        if debug_curl is None:
+            debug_curl = os.getenv("DEBUG_CURL_LOGGING", "true").lower() == "true"
+        _buyer_client = BuyerBackendClient(base_url, api_key, debug_curl=debug_curl)
+        logger.info(f"Singleton BuyerBackendClient created with debug_curl={debug_curl}")
     return _buyer_client

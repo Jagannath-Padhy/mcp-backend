@@ -24,6 +24,12 @@ from mcp_agent.agents.agent import Agent
 from mcp_agent.workflows.llm.augmented_llm_google import GoogleAugmentedLLM
 from mcp_agent.workflows.llm.augmented_llm import RequestParams
 
+# Import MCP SessionService for unified session management
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ondc-shopping-mcp'))
+from src.services.session_service import get_session_service
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,7 +41,6 @@ limiter = Limiter(key_func=get_remote_address)
 mcp_app = None
 agent = None
 llm = None
-sessions = {}  # In-memory session storage (use Redis/MongoDB in production)
 session_llms = {}  # Session-specific LLM instances with conversation history
 
 # ============================================================================
@@ -50,21 +55,6 @@ def generate_session_id() -> str:
     """Generate a unique session ID."""
     return f"session_{uuid.uuid4().hex}"
 
-def create_or_update_session(session_id: str, device_id: str, metadata: Dict[str, Any] = None) -> Dict[str, Any]:
-    """Create a new session or update existing one."""
-    if session_id not in sessions:
-        sessions[session_id] = {
-            "session_id": session_id,
-            "device_id": device_id,
-            "created_at": datetime.now(),
-            "last_activity": datetime.now(),
-            "metadata": metadata or {}
-        }
-    else:
-        sessions[session_id]["last_activity"] = datetime.now()
-        if metadata:
-            sessions[session_id]["metadata"].update(metadata)
-    return sessions[session_id]
 
 def check_agent_ready():
     """Check if agent is ready and raise appropriate error."""
@@ -72,6 +62,57 @@ def check_agent_ready():
         raise HTTPException(status_code=503, detail="Agent not ready")
     if not llm:
         raise HTTPException(status_code=503, detail="LLM not ready")
+
+def is_session_initialized(session_id: str) -> bool:
+    """Check if session has been properly initialized with credentials using MCP SessionService"""
+    session_service = get_session_service()
+    
+    # CRITICAL: Force fresh read from disk to bypass cache issues
+    # The MCP tools and chat API use different SessionService instances
+    # So we need to ensure we get the latest data from disk, not stale cache
+    session_obj = session_service._load_from_disk(session_id)
+    
+    if not session_obj:
+        logger.info(f"🔍 Session {session_id} not found in MCP SessionService")
+        return False
+    
+    # Use the same validation logic as MCP server
+    has_auth = session_obj.user_authenticated
+    has_user_id = bool(session_obj.user_id)
+    has_device_id = bool(session_obj.device_id)
+    
+    # Debug: log the actual session object values
+    logger.info(f"🔍 Session {session_id} check - authenticated: {has_auth}, user_id: {has_user_id}, device_id: {has_device_id}")
+    logger.debug(f"🔍 Session raw values - user_authenticated: '{session_obj.user_authenticated}', user_id: '{session_obj.user_id}', device_id: '{session_obj.device_id}'")
+    
+    # Session is initialized if it has authentication and both user_id and device_id
+    return (has_auth and has_user_id and has_device_id)
+
+def is_initialization_request(message: str) -> bool:
+    """Check if the message is requesting initialization"""
+    initialization_keywords = [
+        "initialize_shopping", "initialize", "start shopping", "begin shopping",
+        "setup session", "create session", "userId", "deviceId"
+    ]
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in initialization_keywords)
+
+def get_initialization_required_response() -> str:
+    """Get the standard response for initialization requirement"""
+    return (
+        "🚨 **Session Initialization Required**\n\n"
+        "Before you can start shopping, you must initialize your session with your Himira credentials:\n\n"
+        "**Call:** `initialize_shopping(userId='your_user_id', deviceId='your_device_id')`\n\n"
+        "**How to get credentials:**\n"
+        "• Log into your Himira frontend\n"
+        "• Open browser Developer Tools (F12)\n" 
+        "• Check localStorage for userId and deviceId\n\n"
+        "**Why required:**\n"
+        "• Access your existing cart and order history\n"
+        "• Proper session isolation between users\n"
+        "• Full ONDC shopping functionality\n\n"
+        "Please provide your credentials to start shopping!"
+    )
 
 def determine_context_type(tool_result: Dict[str, Any]) -> tuple[str, bool]:
     """Determine context type and action requirement from tool result.
@@ -130,46 +171,61 @@ async def lifespan(app: FastAPI):
             # Create agent connected to MCP server via STDIO
             agent = Agent(
                 name="shopping_assistant",
-                instruction="""You are an intelligent ONDC shopping assistant operating in GUEST MODE.
-Guest Configuration:
-- userId: guestUser
-- deviceId: provided by user or auto-generated
+                instruction="""You are an intelligent ONDC shopping assistant with MANDATORY INITIALIZATION requirement.
 
-Order Journey Flow (complete up to on_init):
-1. initialize_shopping → Create guest session
-2. search_products → Search for products
-3. add_to_cart → Add items to cart
-4. view_cart → Show cart contents
-5. select_items_for_order → Get delivery quotes (needs city, state, pincode)
-6. initialize_order → Set customer details (name, address, phone, email)
-7. create_payment → [MOCK] Create test payment
-8. confirm_order → [MOCK] Confirm with mock payment
+🚨 CRITICAL: MANDATORY INITIALIZATION FLOW 🚨
+Every new shopping session MUST start with initialize_shopping(userId, deviceId) before ANY other operations.
 
-SEARCH PATTERNS - Always use search_products for ANY mention of products:
-- "search for X" 
-- "find X"  
-- "looking for X"
-- "I need X"
-- "show me X"
-- "get X"
-- "X products"
-- "buy X"
-- "shop for X"
-- "X" (any product name, including plural forms like "jams", "apples", "oils")
+SESSION FLOW:
+1. **FIRST STEP (MANDATORY)**: initialize_shopping(userId, deviceId) - Required for every new session
+2. search_products → Search for products (requires session_id from step 1)
+3. add_to_cart → Add items to cart (requires session_id)
+4. view_cart → Show cart contents (requires session_id)
+5. select_items_for_order → Get delivery quotes (requires session_id)
+6. initialize_order → Set customer details (requires session_id)
+7. create_payment → Create payment (requires session_id)
+8. confirm_order → Confirm order (requires session_id)
+
+MANDATORY INITIALIZATION RULES:
+- If user asks for ANY shopping operation without proper initialization, REFUSE and explain they need to initialize first
+- NO guest mode defaults - userId and deviceId are MANDATORY
+- Session ID from initialize_shopping must be used in ALL subsequent operations
+- Users must provide their Himira frontend credentials (userId, deviceId)
+
+INITIALIZATION REQUIREMENT RESPONSES:
+If user tries to shop without initialization, respond with:
+"🚨 **Session Initialization Required**
+
+Before you can start shopping, you must initialize your session with your Himira credentials:
+
+**Call:** `initialize_shopping(userId='your_user_id', deviceId='your_device_id')`
+
+**How to get credentials:**
+• Log into your Himira frontend
+• Open browser Developer Tools (F12) 
+• Check localStorage for userId and deviceId
+
+**Why required:**
+• Access your existing cart and order history
+• Proper session isolation between users
+• Full ONDC shopping functionality
+
+Please provide your credentials to start shopping!"
+
+SEARCH PATTERNS - ONLY after initialization:
+- "search for X", "find X", "looking for X", "I need X", "show me X", "get X"
+- "X products", "buy X", "shop for X" 
+- Any product names (jams, apples, oils, etc.)
 - ANY food, grocery, or merchandise query
-- When user mentions any product name, ALWAYS use search_products
 
-IMPORTANT:
-- Never ask for login/authentication
-- Guide users sequentially through the flow
-- Collect required info at each stage
-- Mark [MOCK] for payment/confirm operations
-- Use tools proactively to help users
+CRITICAL RULES:
+- NEVER bypass initialization requirement
+- NEVER use default guest credentials 
+- ALWAYS check for proper session before tools
+- Guide users to initialize first if missing
+- Use session_id in ALL tool calls after initialization
 
-Always use the appropriate tool based on user intent.
-
-For 'add to cart', use add_to_cart.
-For 'checkout', start with select_items_for_order.""",
+Always enforce mandatory initialization before any shopping operations.""",
                 server_names=["ondc-shopping"]  # Connects to our MCP server
             )
             
@@ -255,11 +311,15 @@ class CartRequest(BaseModel):
 @limiter.limit("60/minute")
 async def health_check(request: Request):
     """Health check endpoint"""
+    # Count active sessions from SessionService
+    session_service = get_session_service()
+    active_sessions = len([f for f in session_service.storage_path.glob("*.json")])
+    
     return {
         "status": "healthy" if llm else "initializing",
         "timestamp": datetime.now(),
         "agent_ready": llm is not None,
-        "active_sessions": len(sessions)
+        "active_sessions": active_sessions
     }
 
 # Session management
@@ -267,32 +327,54 @@ async def health_check(request: Request):
 @limiter.limit("10/minute")
 async def create_session(request: Request, session_req: SessionCreateRequest):
     """Create a new shopping session"""
+    session_service = get_session_service()
     session_id = generate_session_id()
     device_id = session_req.device_id or generate_device_id()
     
-    session = create_or_update_session(session_id, device_id, session_req.metadata)
+    # Create session using SessionService
+    session_obj = session_service.create_with_id(session_id)
+    session_obj.device_id = device_id
+    session_service.update(session_obj)
+    
     logger.info(f"Created session: {session_id}")
     
-    return SessionResponse(**session)
+    return SessionResponse(
+        session_id=session_obj.session_id,
+        device_id=session_obj.device_id,
+        created_at=session_obj.created_at,
+        last_activity=session_obj.last_accessed,
+        metadata=session_req.metadata or {}
+    )
 
 @app.get("/api/v1/sessions/{session_id}", response_model=SessionResponse)
 @limiter.limit("30/minute")
 async def get_session(request: Request, session_id: str):
     """Get session information"""
-    if session_id not in sessions:
+    session_service = get_session_service()
+    session_obj = session_service.get(session_id)
+    
+    if not session_obj:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    return SessionResponse(**sessions[session_id])
+    return SessionResponse(
+        session_id=session_obj.session_id,
+        device_id=session_obj.device_id,
+        created_at=session_obj.created_at,
+        last_activity=session_obj.last_accessed,
+        metadata={}  # Could extract from session if needed
+    )
 
 @app.delete("/api/v1/sessions/{session_id}")
 @limiter.limit("20/minute")
 async def delete_session(request: Request, session_id: str):
     """End a shopping session"""
-    if session_id not in sessions:
+    session_service = get_session_service()
+    
+    if not session_service.get(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     
     # Clean up session data and LLM
-    del sessions[session_id]
+    session_service.delete(session_id)
     if session_id in session_llms:
         del session_llms[session_id]
     
@@ -304,22 +386,76 @@ async def delete_session(request: Request, session_id: str):
 @app.post("/api/v1/chat", response_model=ChatResponse)
 @limiter.limit("20/minute")
 async def chat(request: Request, chat_req: ChatRequest):
-    """Chat with the shopping assistant"""
+    """Chat with the shopping assistant - Enforces mandatory initialization"""
     
     check_agent_ready()
     
-    # Generate IDs if not provided
+    # Check if this is a new session without credentials
+    if not chat_req.session_id:
+        # New session - check if this is an initialization request
+        if not is_initialization_request(chat_req.message):
+            # Block all non-initialization requests for new sessions
+            return ChatResponse(
+                response=get_initialization_required_response(),
+                session_id="",  # No session until initialized
+                device_id="",   # No device until initialized
+                timestamp=datetime.now(),
+                data=None,
+                context_type="initialization_required",
+                action_required=True
+            )
+    else:
+        # Existing session - check if it's properly initialized
+        # IMPORTANT: Only validate for non-initialization requests
+        # Initialization requests need to be processed first to create the session data
+        if not is_initialization_request(chat_req.message):
+            if not is_session_initialized(chat_req.session_id):
+                # Session exists but not initialized - require initialization
+                return ChatResponse(
+                    response=get_initialization_required_response(),
+                    session_id=chat_req.session_id,
+                    device_id=chat_req.device_id or "",
+                    timestamp=datetime.now(),
+                    data=None,
+                    context_type="initialization_required", 
+                    action_required=True
+                )
+    
+    # Generate IDs if not provided (only for initialization requests)
     device_id = chat_req.device_id or generate_device_id()
     session_id = chat_req.session_id or generate_session_id()
     
-    # Create or update session
-    create_or_update_session(session_id, device_id)
+    # Create or get session using SessionService
+    session_service = get_session_service()
+    session_obj = session_service.get_or_create(session_id)
+    if not session_obj.device_id:
+        session_obj.device_id = device_id
+        session_service.update(session_obj)
     
     try:
+        # CRITICAL: Set file-based session context for MCP tools
+        # This ensures all MCP tool calls use the correct chat API session
+        # Uses file-based approach since MCP server runs in separate process
+        try:
+            import tempfile
+            import os
+            
+            # Create session context file that MCP server can read
+            context_dir = os.path.expanduser("~/.ondc-mcp")
+            os.makedirs(context_dir, exist_ok=True)
+            context_file = os.path.join(context_dir, "chat_session_context.txt")
+            
+            with open(context_file, 'w') as f:
+                f.write(session_id)
+            
+            logger.info(f"Set MCP session context file: {session_id}")
+        except Exception as e:
+            logger.warning(f"Failed to set MCP session context file: {e}")
+        
         # Get session-specific LLM with conversation history
         session_llm = await get_session_llm(session_id)
         
-        # Enhance message with context
+        # Enhance message with context (simplified, no need for manual injection now)
         enhanced_message = f"[Session: {session_id}] [Device: {device_id}] {chat_req.message}"
         
         # Configure request parameters for proper tool calling
@@ -358,6 +494,9 @@ async def chat(request: Request, chat_req: ChatRequest):
                                     tool_result = json.loads(part.function_response.content)
                                     structured_data = tool_result
                                     
+                                    # Tool result processing - no longer need to track initialization 
+                                    # since SessionService handles this automatically
+                                    
                                     # Determine context type using helper function
                                     context_type, action_required = determine_context_type(tool_result)
                                 except (json.JSONDecodeError, AttributeError):
@@ -370,6 +509,17 @@ async def chat(request: Request, chat_req: ChatRequest):
         
         response = response_text or "I'm ready to help you with your shopping needs!"
         
+        # IMPORTANT: Clean up session context file AFTER LLM response is processed
+        # This ensures MCP tools can access the session during the request
+        try:
+            import os
+            context_file = os.path.expanduser("~/.ondc-mcp/chat_session_context.txt")
+            if os.path.exists(context_file):
+                os.remove(context_file)
+                logger.debug(f"Cleaned up MCP session context file after LLM response")
+        except Exception as e:
+            logger.debug(f"Session context file cleanup failed (not critical): {e}")
+
         return ChatResponse(
             response=response,
             session_id=session_id,
@@ -382,6 +532,15 @@ async def chat(request: Request, chat_req: ChatRequest):
         
     except Exception as e:
         logger.error(f"Chat error: {e}")
+        # Clean up session context file on error too
+        try:
+            import os
+            context_file = os.path.expanduser("~/.ondc-mcp/chat_session_context.txt")
+            if os.path.exists(context_file):
+                os.remove(context_file)
+                logger.debug(f"Cleaned up MCP session context file on error")
+        except Exception as cleanup_error:
+            logger.debug(f"Session context file cleanup on error failed: {cleanup_error}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Search endpoint
@@ -494,6 +653,7 @@ async def manage_cart(request: Request, device_id: str, cart_req: CartRequest):
 @app.get("/")
 async def root():
     """API information"""
+    session_service = get_session_service()
     return {
         "name": "ONDC Shopping Backend API",
         "version": "1.0.0",
@@ -506,7 +666,7 @@ async def root():
             "cart": "/api/v1/cart/{device_id}"
         },
         "docs": "/docs",
-        "active_sessions": len(sessions)
+        "active_sessions": len(session_service.sessions_cache)
     }
 
 if __name__ == "__main__":
