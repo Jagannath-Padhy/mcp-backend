@@ -8,7 +8,7 @@ import asyncio
 import time
 
 from ..models.session import Session, CheckoutState, CheckoutStage, DeliveryInfo
-from ..buyer_backend_client import BuyerBackendClient
+from ..buyer_backend_client import BuyerBackendClient, get_buyer_backend_client
 from ..data_models.biap_context_factory import get_biap_context_factory
 from ..services.product_enrichment_service import get_product_enrichment_service
 from ..services.biap_validation_service import get_biap_validation_service
@@ -23,12 +23,7 @@ from ..utils.ondc_constants import (
     DEFAULT_GPS,
     ERROR_MESSAGES
 )
-from ..utils.location_utils import (
-    transform_provider_locations,
-    create_provider_for_context,
-    extract_location_ids,
-    build_location_objects
-)
+# Removed location utilities - using real provider data directly from cart items
 
 logger = get_logger(__name__)
 
@@ -43,7 +38,7 @@ class CheckoutService:
         Args:
             buyer_backend_client: Client for backend API calls
         """
-        self.buyer_app = buyer_backend_client or BuyerBackendClient()
+        self.buyer_app = buyer_backend_client or get_buyer_backend_client()
         self.context_factory = get_biap_context_factory()
         self.product_enrichment = get_product_enrichment_service()
         self.validation = get_biap_validation_service()
@@ -138,7 +133,8 @@ class CheckoutService:
         session: Session, 
         delivery_city: str,
         delivery_state: str,
-        delivery_pincode: str
+        delivery_pincode: str,
+        delivery_gps: str
     ) -> Dict[str, Any]:
         """
         BIAP-compatible ONDC SELECT stage - Get quotes and fulfillment options
@@ -203,23 +199,22 @@ class CheckoutService:
             city_code = get_city_code_by_pincode(delivery_pincode)
             logger.debug(f"[CheckoutService] City code: {city_code}")
             
-            # Step 4: Create BIAP-compatible context (match Himira documentation format)
-            logger.info("[CheckoutService] Step 4: Creating BIAP-compatible context...")
+            # Step 4: Create SELECT context (automatically simplified for SELECT operations)
+            logger.info("[CheckoutService] Step 4: Creating SELECT context...")
             context = self.context_factory.create({
                 'action': 'select',
                 'transaction_id': session.checkout_state.transaction_id,
-                'city': delivery_pincode,  #  CRITICAL: Use pincode directly as per Himira docs
+                'city': delivery_pincode,  #  Use pincode directly as per backend format
                 'pincode': delivery_pincode
             })
-            logger.debug(f"[CheckoutService] Context created: {json.dumps(context, indent=2)}")
+            logger.debug(f"[CheckoutService] SELECT context created: {json.dumps(context, indent=2)}")
             
-            # Step 5: Get BPP info from validated items
+            # Step 5: Get BPP info from validated items (for logging only)
             logger.info("[CheckoutService] Step 5: Getting BPP info from validated items...")
             bpp_info = self.validation.get_order_bpp_info(enriched_items)
             logger.debug(f"[CheckoutService] BPP info: {bpp_info}")
             if bpp_info:
-                context['bpp_id'] = bpp_info['bpp_id']
-                context['bpp_uri'] = bpp_info['bpp_uri']
+                # Don't add to context - keep context clean like working frontend
                 logger.info(f"[CheckoutService] Using BPP: {bpp_info['bpp_id']} at {bpp_info['bpp_uri']}")
             
             # Step 6: Transform enriched items to BIAP SELECT format
@@ -229,32 +224,22 @@ class CheckoutService:
             provider_info = None
             
             for item in enriched_items:
-                # Create SELECT item structure (Postman collection format)
+                # Create SELECT item structure matching working frontend format exactly
                 select_item = {
                     'id': item.id,                   # Full ONDC ID
                     'local_id': item.local_id,       # UUID local ID
+                    'customisationState': {},        # Required by frontend format
                     'quantity': {'count': item.quantity},  # Wrapped in count object
-                    'customisationState': {},        # Required by Postman format
-                    'customisations': None,          # Required by Postman format
-                    'hasCustomisations': False       # Required by Postman format
+                    'customisations': None,          # Required by frontend format
+                    'hasCustomisations': False       # Required by frontend format
                 }
                 
-                # Add product structure for biap backend compatibility
-                if item.location_id:
-                    # CRITICAL FIX: biap backend expects item.product.location_id, not item.location_id
-                    select_item['product'] = {
-                        'location_id': item.location_id
-                    }
-                    # Also keep the direct location_id for backward compatibility
-                    select_item['location_id'] = item.location_id
-                    location_set.add(item.location_id)
-                
-                # Add provider at item level using utility
+                # Add provider at item level - use real provider data directly
                 if item.provider:
-                    select_item['provider'] = create_provider_for_context(
-                        item.provider, 
-                        context="item"
-                    )
+                    select_item['provider'] = item.provider  # Use real provider data as-is
+                    # Track location for debugging
+                    if item.location_id:
+                        location_set.add(item.location_id)
                 
                 # Capture provider info from first item
                 if not provider_info and item.provider:
@@ -262,38 +247,28 @@ class CheckoutService:
                 
                 select_items.append(select_item)
             
-            # Step 7: Build location objects using utility
-            location_objs = build_location_objects(location_set, provider_info)
+            # Step 7: Location objects not needed - provider data is in items
             
-            # Step 8: Create SELECT request matching working Postman collection
-            # Backend expects message.cart structure with provider at cart level
-            
-            # Create provider at cart level using utility
-            cart_provider = create_provider_for_context(
-                provider_info, 
-                context="cart"
-            ) if provider_info else None
+            # Step 8: Create SELECT request matching working frontend format
+            # Frontend format: No provider at cart level, only in items
             
             cart_obj = {
-                'items': select_items  # Items have provider at item level
+                'items': select_items  # Items have provider at item level - this is sufficient
             }
             
-            # Add provider at cart level if available (for backend transformation)
-            if cart_provider:
-                cart_obj['provider'] = cart_provider
-                logger.debug(f"[CheckoutService] Cart provider: {json.dumps(cart_provider, indent=2)}")
+            # Frontend format: NO cart-level provider (removed for compatibility)
+            logger.info("[CheckoutService] Using frontend format - no cart-level provider")
             
-            # Get GPS coordinates using centralized utility
-            gps_coords = get_city_gps(delivery_city)
-            logger.debug(f"[CheckoutService] GPS coordinates for {delivery_city}: {gps_coords}")
+            # Use user-provided GPS coordinates
+            logger.debug(f"[CheckoutService] Using user-provided GPS coordinates: {delivery_gps}")
             
-            #  CRITICAL: Simplify fulfillments to match Postman collection exactly
+            #  CRITICAL: Simplify fulfillments to match frontend format exactly
             fulfillments_obj = [{
                 'end': {
                     'location': {
-                        'gps': gps_coords,  #  Proper lat,lng coordinates
+                        'gps': delivery_gps,  #  User-provided accurate coordinates
                         'address': {
-                            'area_code': delivery_pincode  #  Only area_code like Postman
+                            'area_code': delivery_pincode  #  Only area_code like frontend
                         }
                     }
                 }
@@ -305,8 +280,8 @@ class CheckoutService:
                     'cart': cart_obj,             #  Backend expects 'cart' (confirmed from Postman collection)
                     'fulfillments': fulfillments_obj  #  At message level as backend expects
                 },
-                'userId': session.session_id,
-                'deviceId': getattr(session, 'device_id', config.guest.device_id)
+                'userId': session.user_id,  # Fixed: Use real Firebase user ID, not session ID
+                'deviceId': session.device_id  # Mandatory initialization ensures this is always present
             }
             
             logger.info("[CheckoutService] Step 9: Calling BIAP SELECT API...")
@@ -315,51 +290,23 @@ class CheckoutService:
             logger.info(f"  - Transaction ID: {context.get('transaction_id')}")
             logger.info(f"  - Items count: {len(select_items)}")
             logger.info(f"  - Delivery pincode: {delivery_pincode}")
-            logger.info(f"  - Cart provider ID: {cart_provider['id'] if cart_provider else 'None'}")
-            logger.info(f"  - Cart provider locations: {len(cart_provider.get('locations', [])) if cart_provider else 0}")
+            logger.info(f"  - Using simplified frontend format (no cart provider)")
             
-            # CRITICAL VALIDATION: Ensure provider locations match working curl format
-            if cart_provider and 'locations' in cart_provider:
-                logger.info(f"[CheckoutService] Validating provider location structure:")
-                logger.info(f"  Provider ID: {cart_provider.get('id')}")
-                logger.info(f"  Provider local_id: {cart_provider.get('local_id')}")
-                
-                for idx, loc in enumerate(cart_provider['locations']):
-                    logger.info(f"  - Location[{idx}]: {json.dumps(loc)}")
-                    if isinstance(loc, dict):
-                        has_id = 'id' in loc
-                        has_local_id = 'local_id' in loc
-                        logger.info(f"    Has 'id' field: {has_id}")
-                        logger.info(f"    Has 'local_id' field: {has_local_id}")
-                        
-                        # Validate against working curl format
-                        if has_id and has_local_id:
-                            # Verify ONDC format for ID (should contain underscores)
-                            full_id = loc.get('id', '')
-                            local_id = loc.get('local_id', '')
-                            if '_' in full_id and full_id.endswith(local_id):
-                                logger.info(f"    ✅ Location format matches curl: full_id={full_id}, local_id={local_id}")
-                            else:
-                                logger.warning(f"    ⚠️ Location ID format may not match ONDC standard")
-                        else:
-                            # CRITICAL FIX: Ensure both fields are present
-                            if not has_id and has_local_id:
-                                logger.warning(f"[CheckoutService] Location missing 'id' field, using local_id as fallback")
-                                loc['id'] = loc['local_id']
-                            elif not has_id:
-                                logger.error(f"[CheckoutService] Location missing both 'id' and 'local_id' fields!")
-                                # Set default location ID
-                                from ..utils.ondc_constants import HIMIRA_LOCATION_LOCAL_ID
-                                loc['id'] = HIMIRA_LOCATION_LOCAL_ID
-                                logger.info(f"[CheckoutService] Set default location id: {HIMIRA_LOCATION_LOCAL_ID}")
-                                
-                        # Final validation after any fixes
-                        if 'id' in loc and 'local_id' in loc:
-                            logger.info(f"    ✅ Location validation passed: {json.dumps(loc)}")
-                        else:
-                            logger.error(f"    ❌ Location validation failed: missing required fields")
-            else:
-                logger.warning(f"[CheckoutService] No provider locations found in cart_provider: {cart_provider}")
+            # Validate item-level providers (frontend format validation)
+            for idx, item in enumerate(select_items):
+                if 'provider' in item:
+                    provider = item['provider']
+                    logger.info(f"[CheckoutService] Item[{idx}] provider validation:")
+                    logger.info(f"  Provider ID: {provider.get('id')}")
+                    logger.info(f"  Provider local_id: {provider.get('local_id')}")
+                    
+                    if 'locations' in provider:
+                        for loc_idx, loc in enumerate(provider['locations']):
+                            logger.info(f"  - Location[{loc_idx}]: {json.dumps(loc)}")
+                            if isinstance(loc, dict) and 'id' in loc and 'local_id' in loc:
+                                logger.info(f"    ✅ Item provider location validated: {loc.get('id')}")
+                else:
+                    logger.warning(f"[CheckoutService] Item[{idx}] missing provider information")
             
             logger.debug(f"[CheckoutService] Full SELECT request payload:\n{json.dumps(select_data, indent=2)}")
             
@@ -666,7 +613,7 @@ class CheckoutService:
                         }
                     }
                 },
-                'userId': session.session_id
+                'userId': session.user_id  # Fixed: Use real Firebase user ID
             }
             
             # Step 12: Call BIAP INIT API - GUEST MODE
@@ -1002,7 +949,7 @@ class CheckoutService:
                         'payment': payment_obj
                     }
                 },
-                'userId': session.session_id
+                'userId': session.user_id  # Fixed: Use real Firebase user ID
             }
             
             # Step 9: Call BIAP CONFIRM API - MOCK MODE FOR GUEST

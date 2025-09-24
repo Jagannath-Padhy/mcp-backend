@@ -1,14 +1,23 @@
 """Session management operations for MCP adapters"""
 
+import sys
+import os
+import uuid
+import time
 from typing import Dict, Any, Optional
-from .utils import (
+
+# Ensure Python path is set for tool execution context
+current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+from src.adapters.utils import (
     get_persistent_session, 
     save_persistent_session, 
     extract_session_id, 
     format_mcp_response,
     get_services
 )
-from ..utils.logger import get_logger
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -21,11 +30,14 @@ session_service = services['session_service']
 _LAST_SESSION = None
 
 
-async def initialize_shopping(session_id: Optional[str] = None, **kwargs) -> Dict[str, Any]:
-    """MCP adapter for initialize_shopping - Guest-only mode
+async def initialize_shopping(userId: str,
+                             deviceId: str,
+                             session_id: Optional[str] = None, 
+                             **kwargs) -> Dict[str, Any]:
+    """MCP adapter for initialize_shopping - User credential mode
     
-    Creates a new guest session and prompts for deviceId to enable
-    complete order placement journey without authentication.
+    Collects userId and deviceId from users to ensure backend cart isolation.
+    Users should provide their Himira frontend credentials.
     """
     try:
         # Create or get session with enhanced conversation tracking
@@ -35,70 +47,68 @@ async def initialize_shopping(session_id: Optional[str] = None, **kwargs) -> Dic
         global _LAST_SESSION
         _LAST_SESSION = None
         
-        # Get guest configuration from config
-        from ..config import Config
-        config = Config()
+        # MANDATORY CREDENTIALS - Validate non-empty values
+        if not userId.strip() or not deviceId.strip():
+            return format_mcp_response(
+                False,
+                "🚨 **Invalid Himira Credentials**\n\n"
+                "Both userId and deviceId must be non-empty values.\n\n"
+                "**Call:** `initialize_shopping(userId='your_user_id', deviceId='your_device_id')`\n\n"
+                "**Where to find these:**\n"
+                "• Log into your Himira frontend\n"
+                "• Open browser Developer Tools (F12)\n"
+                "• Check localStorage for your userId and deviceId\n\n"
+                "**Provided values:**\n"
+                f"• userId: '{userId}' ({'valid' if userId.strip() else 'empty/invalid'})\n"
+                f"• deviceId: '{deviceId}' ({'valid' if deviceId.strip() else 'empty/invalid'})",
+                session_obj.session_id
+            )
         
-        # Set guest mode explicitly using configured values
-        session_obj.user_authenticated = False
+        logger.info(f"Using provided Himira credentials: userId={userId}, deviceId={deviceId}")
+        credentials_status = "✅ **Using Your Himira Credentials**"
+        
+        # Set user credentials
+        session_obj.user_authenticated = True  # Since user provided credentials
         session_obj.demo_mode = False
-        session_obj.user_id = config.guest.user_id
+        session_obj.user_id = userId
+        session_obj.device_id = deviceId
         
-        # Use configured device ID or allow override from kwargs
-        device_id = kwargs.get('deviceId') or kwargs.get('device_id') or config.guest.device_id
+        logger.info(f"Initialized session {session_obj.session_id[:8]}... with userId: {userId}, deviceId: {deviceId}")
+        logger.debug(f"Session object state - user_id: {session_obj.user_id}, device_id: {session_obj.device_id}")
         
-        # Always use the configured device ID for consistent guest journey
-        session_obj.device_id = device_id
-        logger.info(f"Initialized guest session {session_obj.session_id[:8]}... with configured deviceId: {device_id}")
+        # No need for login - user provided their frontend credentials
+        # Backend API calls will use wil-api-key header for authentication
+        logger.info(f"Session ready with user credentials - no login needed (using wil-api-key for backend auth)")
         
-        # Perform guest login to get auth token for API authentication
-        try:
-            from ..buyer_backend_client import BuyerBackendClient
-            buyer_app = BuyerBackendClient()
-            login_data = {"deviceId": device_id}
-            
-            logger.info(f"Attempting guest login for deviceId: {device_id}")
-            login_response = await buyer_app.guest_user_login(login_data)
-            
-            if login_response and login_response.get('token'):
-                session_obj.auth_token = login_response['token']
-                session_obj.user_authenticated = True
-                logger.info(f"✅ Guest login successful for session {session_obj.session_id[:8]}... - Auth token acquired")
-                auth_status = "🔑 **Authenticated** (Guest login successful)"
-            else:
-                logger.warning(f"⚠️ Guest login failed for session {session_obj.session_id[:8]}... - No auth token received")
-                logger.debug(f"Login response: {login_response}")
-                auth_status = "⚠️ **Not Authenticated** (Guest login failed - limited functionality)"
-                
-        except Exception as login_error:
-            logger.error(f"❌ Guest login error for session {session_obj.session_id[:8]}...: {login_error}")
-            auth_status = "❌ **Authentication Error** (Guest login failed - limited functionality)"
-        
+        # SUCCESS - Real credentials provided
         success_message = (
-            f"✅ **Guest Session Ready!**\n\n"
+            f"✅ **Session Ready with Your Himira Credentials!**\n\n"
             f"**Session ID:** `{session_obj.session_id}`\n"
-            f"**Device ID:** `{device_id}`\n"
-            f"**User ID:** `{config.guest.user_id}`\n"
-            f"**Auth Status:** {auth_status}\n\n"
-            f"🛍️ **Start Shopping:**\n"
+            f"**Your User ID:** `{userId}`\n"
+            f"**Your Device ID:** `{deviceId}`\n\n"
+            f"{credentials_status}\n\n"
+            f"🛍️ **Your cart and order history are now accessible!**\n\n"
+            f"**Start Shopping:**\n"
             f"• `search_products query='organic rice'`\n"
-            f"• `browse_categories`\n"
-            f"• `view_cart`\n\n"
+            f"• `view_cart` - See your existing cart\n"
+            f"• `browse_categories`\n\n"
             f"🚀 **Full Order Journey Available:**\n"
             f"Search → Cart → Checkout → Payment → Delivery\n\n"
             f"Ready to shop! What would you like to find?"
         )
         
         # Save session with configured IDs
+        logger.info(f"Saving session {session_obj.session_id[:8]}... with userId={session_obj.user_id}, deviceId={session_obj.device_id[:8]}...")
         save_persistent_session(session_obj, conversation_manager)
+        logger.info(f"Session {session_obj.session_id[:8]}... saved successfully")
         
         return format_mcp_response(
             True,
             success_message,
             session_obj.session_id,
-            guest_mode=True,
-            user_id=config.guest.user_id,
-            device_id=device_id,
+            authenticated_mode=True,  # Real user credentials
+            user_id=userId,
+            device_id=deviceId,
             next_action="start_shopping"
         )
         

@@ -1,16 +1,24 @@
 """Search operations for MCP adapters"""
 
+import sys
+import os
+
+# Ensure Python path is set for tool execution context
+current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 from typing import Dict, Any, Optional
 from datetime import datetime
-from .utils import (
+from src.adapters.utils import (
     get_persistent_session, 
     save_persistent_session, 
     extract_session_id, 
     format_mcp_response,
     get_services
 )
-from ..utils.logger import get_logger
-from ..utils.field_mapper import enhance_for_mcp
+from src.utils.logger import get_logger
+from src.utils.field_mapper import enhance_for_mcp
 
 logger = get_logger(__name__)
 
@@ -20,7 +28,7 @@ search_service = services['search_service']
 session_service = services['session_service']
 
 
-async def search_products(session_id: Optional[str] = None, query: str = '', 
+async def search_products(query: str = '', session_id: Optional[str] = None,
                              latitude: Optional[float] = None,
                              longitude: Optional[float] = None,
                              page: int = 1, limit: int = 10, 

@@ -149,6 +149,23 @@ class BuyerBackendClient:
                         logger.info(f"[CURL RESPONSE] Body:\n{json.dumps(response_json, indent=2)}")
                     except:
                         logger.info(f"[CURL RESPONSE] Body:\n{response.text[:1000]}")  # Limit size
+                    
+                    # Also write response to dedicated curl log file
+                    try:
+                        curl_log_path = "/app/logs/curl_requests.log"
+                        with open(curl_log_path, "a") as f:
+                            f.write(f"RESPONSE STATUS: {response.status_code}\n")
+                            if response.status_code != 200:
+                                f.write(f"ERROR RESPONSE: {response.text[:1000]}\n")
+                            else:
+                                try:
+                                    response_json = response.json()
+                                    f.write(f"SUCCESS RESPONSE: {json.dumps(response_json, separators=(',', ':'))[:500]}...\n")
+                                except:
+                                    f.write(f"SUCCESS RESPONSE: {response.text[:500]}\n")
+                            f.write("=" * 80 + "\n\n")
+                    except Exception as e:
+                        logger.warning(f"Failed to write response to curl log file: {e}")
                 
                 if response.status_code == 200:
                     try:
@@ -178,7 +195,19 @@ class BuyerBackendClient:
                     return {"error": f"HTTP {response.status_code}", "details": response.text}
                     
         except Exception as e:
-            logger.error(f"Request failed for {endpoint}: {e}")
+            logger.error(f"Request failed for {endpoint}: {type(e).__name__}: {e}")
+            # Enhanced error details for timeout/connection issues
+            if "timeout" in str(e).lower() or "read timeout" in str(e).lower():
+                logger.error(f"TIMEOUT ERROR: Backend took too long to respond to {endpoint}")
+            elif "connection" in str(e).lower():
+                logger.error(f"CONNECTION ERROR: Failed to connect to backend for {endpoint}")
+            
+            # Log request details for debugging
+            if json_data:
+                logger.error(f"Request payload that failed: {json.dumps(json_data, indent=2)[:500]}...")
+            if params:
+                logger.error(f"Request params that failed: {params}")
+            
             return {"error": str(e)}
     
     # ================================

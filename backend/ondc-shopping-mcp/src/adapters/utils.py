@@ -1,9 +1,18 @@
 """Shared utilities for MCP adapters"""
 
+import sys
+import os
+
+# Ensure Python path is set for tool execution context
+current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 from typing import Dict, Any, Optional, List
 import logging
 import json
-from ..utils.logger import get_logger
+import traceback
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -26,7 +35,7 @@ def get_persistent_session(session_id: Optional[str] = None, tool_name: str = "u
     # Log MCP tool call for debugging
     logger.info(f"[MCP Tool Call] {tool_name} - Session: {session_id[:16] if session_id else 'NEW'}")
     logger.debug(f"[MCP Tool Call] Full kwargs: {json.dumps(kwargs, default=str)}")
-    from ..services.session_service import get_session_service
+    from src.services.session_service import get_session_service
     session_service = get_session_service()
     
     if session_id:
@@ -47,7 +56,7 @@ def get_persistent_session(session_id: Optional[str] = None, tool_name: str = "u
 def save_persistent_session(session_obj, conversation_manager):
     """Simplified helper to save session directly to session service"""
     # conversation_manager is now None (removed), so save directly to session service
-    from ..services.session_service import get_session_service
+    from src.services.session_service import get_session_service
     session_service = get_session_service()
     session_service.update(session_obj)
     logger.debug(f"[Session] Saved session: {session_obj.session_id}")
@@ -214,7 +223,7 @@ def format_products_for_display(products: List[Dict[str, Any]]) -> List[Dict[str
             
         except Exception as e:
             logger.warning(f"Failed to format product: {e}")
-            import traceback
+            # Use traceback from module level
             logger.warning(f"Traceback: {traceback.format_exc()}")
             # Return original product if formatting fails
             formatted.append(product)
@@ -225,13 +234,13 @@ def format_products_for_display(products: List[Dict[str, Any]]) -> List[Dict[str
 # Get singleton service instances (shared across all adapters)
 def get_services():
     """Get all service instances in one place to avoid duplicate imports"""
-    from ..services.session_service import get_session_service
-    from ..services.cart_service import get_cart_service
-    from ..services.checkout_service import get_checkout_service
-    from ..services.search_service import get_search_service
-    from ..services.user_service import get_user_service
-    from ..services.order_service import get_order_service
-    from ..services.payment_service import get_payment_service
+    from src.services.session_service import get_session_service
+    from src.services.cart_service import get_cart_service
+    from src.services.checkout_service import get_checkout_service
+    from src.services.search_service import get_search_service
+    from src.services.user_service import get_user_service
+    from src.services.order_service import get_order_service
+    from src.services.payment_service import get_payment_service
     
     return {
         'session_service': get_session_service(),

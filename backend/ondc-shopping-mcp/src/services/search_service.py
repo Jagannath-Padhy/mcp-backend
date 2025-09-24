@@ -6,7 +6,7 @@ Handles all product search operations including vector and API search.
 from typing import List, Dict, Any, Optional, Tuple
 import logging
 import asyncio
-from ..buyer_backend_client import BuyerBackendClient
+from ..buyer_backend_client import BuyerBackendClient, get_buyer_backend_client
 from ..vector_search import VectorSearchClient, SearchFilters
 from ..utils.logger import get_logger
 from ..utils.ondc_constants import DEFAULT_CITY_CODE
@@ -26,7 +26,7 @@ class SearchService:
     
     def __init__(self):
         if not hasattr(self, 'initialized'):
-            self.buyer_app = BuyerBackendClient()
+            self.buyer_app = get_buyer_backend_client()
             self.vector_client: Optional[VectorSearchClient] = None
             self._initialize_vector_client()
             self.initialized = True
@@ -454,7 +454,7 @@ class SearchService:
             # Try to get categories from real API
             # Use a broad search to get various products and extract categories
             params = {"name": "", "page": 1, "limit": 100}
-            user_id = "guestUser"
+            user_id = "SYSTEM_CATEGORY_FETCH"  # System operation for category listing
             
             categories_map = {}  # Use map to track category details
             

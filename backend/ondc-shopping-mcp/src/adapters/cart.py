@@ -1,16 +1,24 @@
 """Cart operations for MCP adapters"""
 
+import sys
+import os
+
+# Ensure Python path is set for tool execution context
+current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 from typing import Dict, Any, Optional
 import json
-from .utils import (
+from src.adapters.utils import (
     get_persistent_session, 
     save_persistent_session, 
     extract_session_id, 
     format_mcp_response,
     get_services
 )
-from ..utils.logger import get_logger
-from ..utils.field_mapper import from_backend
+from src.utils.logger import get_logger
+from src.utils.field_mapper import from_backend
 
 logger = get_logger(__name__)
 
@@ -19,8 +27,8 @@ services = get_services()
 cart_service = services['cart_service']
 
 
-async def add_to_cart(session_id: Optional[str] = None, item: Optional[Dict] = None, 
-                         quantity: int = 1, **kwargs) -> Dict[str, Any]:
+async def add_to_cart(item: Optional[Dict] = None, quantity: int = 1, 
+                         session_id: Optional[str] = None, **kwargs) -> Dict[str, Any]:
     """MCP adapter for add_to_cart"""
     try:
         # Get enhanced session with conversation tracking
@@ -132,12 +140,15 @@ async def view_cart(session_id: Optional[str] = None, **kwargs) -> Dict[str, Any
         # If authenticated, fetch cart from backend
         if session_obj.user_authenticated and session_obj.user_id:
             logger.info(f"[Cart] Fetching cart from backend for user {session_obj.user_id}")
-            # Use session device_id if available, otherwise fall back to configured guest device_id
-            device_id = getattr(session_obj, 'device_id', config.guest.device_id)
+            # Use session device_id (mandatory initialization ensures this is always present)
+            device_id = session_obj.device_id
+            if not device_id:
+                logger.error(f"[Cart] No device_id found in session {session_obj.session_id} - session not properly initialized")
+                raise ValueError("Session not properly initialized - missing device_id")
             
-            # Get backend cart
-            from ..buyer_backend_client import BuyerBackendClient
-            buyer_app = BuyerBackendClient()
+            # Get backend cart using singleton with debug logging
+            from ..buyer_backend_client import get_buyer_backend_client
+            buyer_app = get_buyer_backend_client()
             backend_cart = await buyer_app.get_cart(session_obj.user_id, device_id)
             
             if backend_cart and not backend_cart.get('error'):
@@ -167,7 +178,7 @@ async def view_cart(session_id: Optional[str] = None, **kwargs) -> Dict[str, Any
         )
 
 
-async def remove_from_cart(session_id: Optional[str], item_id: str, **kwargs) -> Dict[str, Any]:
+async def remove_from_cart(item_id: str, session_id: Optional[str] = None, **kwargs) -> Dict[str, Any]:
     """MCP adapter for remove_from_cart"""
     try:
         # Get enhanced session with conversation tracking
@@ -201,8 +212,8 @@ async def remove_from_cart(session_id: Optional[str], item_id: str, **kwargs) ->
         )
 
 
-async def update_cart_quantity(session_id: Optional[str], item_id: str, 
-                                  quantity: int, **kwargs) -> Dict[str, Any]:
+async def update_cart_quantity(item_id: str, quantity: int, 
+                                  session_id: Optional[str] = None, **kwargs) -> Dict[str, Any]:
     """MCP adapter for update_cart_quantity"""
     try:
         # Get enhanced session with conversation tracking

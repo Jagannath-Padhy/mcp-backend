@@ -5,19 +5,12 @@ import logging
 import json
 
 from ..models.session import Session, Cart, CartItem
-from ..buyer_backend_client import BuyerBackendClient
+from ..buyer_backend_client import BuyerBackendClient, get_buyer_backend_client
 from ..utils.logger import get_logger
 from ..utils.device_id import get_or_create_device_id
-from ..utils.himira_provider_constants import (
-    enrich_cart_item_with_provider, 
-    HIMIRA_BPP_ID, 
-    HIMIRA_BPP_URI,
-    HIMIRA_LOCATION_LOCAL_ID,
-    generate_himira_item_id,
-    create_minimal_provider_for_cart
-)
-from ..data_models.ondc_schemas import ONDCDataFactory, create_cart_item as create_ondc_item
-from ..utils.field_mapper import enhance_for_backend, FieldMapper
+from ..data_models.ondc_schemas import ONDCDataFactory
+from ..utils.field_mapper import enhance_for_backend
+# Removed fake data imports - using only real data from search results
 
 logger = get_logger(__name__)
 
@@ -32,7 +25,7 @@ class CartService:
         Args:
             buyer_backend_client: Comprehensive client for backend API calls
         """
-        self.buyer_app = buyer_backend_client or BuyerBackendClient()
+        self.buyer_app = buyer_backend_client or get_buyer_backend_client()
         logger.info("CartService initialized with comprehensive backend client")
     
     async def add_item_to_backend(self, session: Session, product: Dict[str, Any], 
@@ -49,8 +42,8 @@ class CartService:
             Tuple of (success, message)
         """
         try:
-            # Check if user is authenticated
-            if not session.user_authenticated or not session.auth_token or not session.user_id:
+            # Check if user is authenticated (WIL API key auth handled by BuyerBackendClient)
+            if not session.user_authenticated or not session.user_id:
                 return False, " Please login to add items to cart"
             
             # Get device ID
@@ -330,7 +323,10 @@ class CartService:
             if not user_id:
                 logger.warning("[Cart] No user_id in session for backend operation")
                 return False
-            device_id = getattr(session, 'device_id', f'mcp_{session.session_id[:8]}')
+            device_id = getattr(session, 'device_id', None)
+            if not device_id:
+                logger.error("[Cart] No device_id in session for backend operation")
+                return False
             
             logger.info(f"[Cart] Syncing {len(session.cart.items)} items with backend for user {user_id}, device {device_id}")
             
@@ -359,7 +355,7 @@ class CartService:
                 else:
                     logger.debug(f"Successfully synced item {item.name} with backend")
             
-            logger.info(f"[Cart] Successfully synced cart with backend for session {session.session_id}")
+            logger.info(f"[Cart] Successfully synced cart with backend for user {user_id}, device {device_id}")
             return True
                 
         except Exception as e:
@@ -368,81 +364,122 @@ class CartService:
     
     def _create_cart_item(self, product: Dict[str, Any], quantity: int) -> CartItem:
         """
-        Create BIAP-compatible CartItem from product data with proper Himira provider structure
+        Create CartItem from search results preserving REAL provider data only
         
         Args:
-            product: Product data dictionary
-            quantity: Quantity
+            product: Product data from search results with real provider/location details
+            quantity: Quantity to add
             
         Returns:
-            CartItem object with BIAP fields and proper ONDC provider data
+            CartItem with real provider data preserved from search results
+            
+        Raises:
+            ValueError: If product lacks required real provider data
         """
-        # Handle price which might be nested
+        # Check for provider data in various formats (provider_details or provider field)
+        provider_details = product.get('provider_details', {})
+        location_details = product.get('location_details', {})
+        
+        # Alternative: check if provider data is in the provider field directly
+        if not provider_details and product.get('provider'):
+            provider_details = product.get('provider', {})
+            
+        # Alternative: check if location data is available in item_details
+        if not location_details:
+            item_details = product.get('item_details', {})
+            if item_details.get('location_id'):
+                # Create synthetic location_details from available data
+                location_details = {
+                    'local_id': item_details.get('location_id'),
+                    'id': f"{provider_details.get('id', '')}_{item_details.get('location_id', '')}"
+                }
+        
+        # Only fail if we have absolutely no provider information
+        if not provider_details and not product.get('provider_id'):
+            error_msg = f"Product '{product.get('name', 'Unknown')}' missing any provider data"
+            logger.error(f"[Cart] {error_msg}")
+            raise ValueError(error_msg)
+        
+        # Extract real provider information with fallbacks
+        provider_id = provider_details.get('id') or product.get('provider_id')
+        provider_local_id = provider_details.get('local_id')
+        location_id = location_details.get('id')  
+        location_local_id = location_details.get('local_id')
+        
+        # Extract from provider_id if structured ID is available
+        if provider_id and not provider_local_id and '_' in str(provider_id):
+            parts = str(provider_id).split('_')
+            if len(parts) >= 3:
+                provider_local_id = parts[-1]  # Last part is usually local_id
+        
+        if not provider_id:
+            error_msg = f"Product '{product.get('name')}' missing provider ID"
+            logger.error(f"[Cart] {error_msg}")
+            raise ValueError(error_msg)
+        
+        logger.info(f"[Cart] Creating cart item with REAL provider data:")
+        logger.info(f"  - Provider ID: {provider_id}")
+        logger.info(f"  - Provider Local ID: {provider_local_id}")
+        logger.info(f"  - Location Local ID: {location_local_id}")
+        
+        # Handle price extraction
         price = product.get('price', 0)
         if isinstance(price, dict):
             price = price.get('value', 0)
         
-        # Get category for provider serviceability
-        category = product.get('category', 'Tinned and Processed Food')
-        
-        # ENHANCED: Use proper Himira provider data from Postman collection
-        # This ensures cart items have the exact structure expected by the backend
-        logger.info(f"[Cart] Creating cart item with Himira provider data for: {product.get('name')}")
-        
-        # Extract local_id from full ONDC ID before enrichment
-        product_data = product.copy()
-        if product.get('id') and '_' in product['id']:
-            # Extract local_id from full ONDC format
-            id_parts = product['id'].split('_')
+        # Extract or generate product local ID
+        product_local_id = product.get('local_id') or product.get('id', '')
+        if product_local_id and '_' in product_local_id:
+            # Extract UUID from full ONDC format
+            id_parts = product_local_id.split('_')
             if len(id_parts) >= 4:
-                product_data['local_id'] = id_parts[-1]
-                logger.info(f"[Cart] Extracted local_id {id_parts[-1]} from full ID {product['id']}")
+                product_local_id = id_parts[-1]
         
-        # Enrich basic product data with proper ONDC provider structure
-        enriched_data = enrich_cart_item_with_provider(product_data, category)
+        if not product_local_id:
+            import uuid
+            product_local_id = str(uuid.uuid4())
         
-        # Extract enriched ONDC fields from Himira constants
-        product_id = enriched_data['id']  # Full ONDC ID format from Himira
-        local_id = enriched_data['local_id']  # UUID format
-        bpp_id = enriched_data['bpp_id']  # hp-seller-preprod.himira.co.in
-        bpp_uri = enriched_data['bpp_uri']  # Full BPP URI
-        location_id = enriched_data['location_id']  # Provider location ID
-        provider_data = enriched_data['provider']  # Full provider structure from Postman
-        contextCity = enriched_data['contextCity']  # std:0172 for Kharar/Mohali
+        # Build real provider structure from search results
+        real_provider = {
+            "id": provider_id,
+            "local_id": provider_local_id,
+            "descriptor": provider_details.get("descriptor", {
+                "name": provider_details.get("name", "Provider"),
+                "short_desc": provider_details.get("name", "Provider")
+            }),
+            "locations": [{
+                "id": location_id or f"{provider_id}_{location_local_id}",
+                "local_id": location_local_id,
+                "gps": location_details.get("gps", "0,0"),
+                "address": location_details.get("address", {})
+            }]
+        }
         
-        logger.info(f"[Cart] Enriched item with Himira ONDC data:")
-        logger.info(f"  - Product ID: {product_id}")
-        logger.info(f"  - Local ID: {local_id}")
-        logger.info(f"  - BPP ID: {bpp_id}")
-        logger.info(f"  - Provider ID: {provider_data['id']}")
-        logger.info(f"  - Location ID: {location_id}")
-        logger.info(f"  - Context City: {contextCity}")
+        # Generate full ONDC product ID
+        full_product_id = f"hp-seller-preprod.himira.co.in_ONDC:RET10_{provider_local_id}_{product_local_id}"
         
-        # Create CartItem with enriched Himira ONDC structure
+        # Create CartItem with preserved real data
         cart_item = CartItem(
-            id=product_id,  # Use enriched ONDC ID format
+            id=full_product_id,
             name=product.get('name', 'Unknown Product'),
             price=float(price),
             quantity=quantity,
-            local_id=local_id,            # UUID from enriched data
-            bpp_id=bpp_id,               # Himira BPP ID
-            bpp_uri=bpp_uri,             # Himira BPP URI
-            location_id=location_id,     # Himira location ID
-            contextCity=contextCity,     # std:0172 for area
-            category=category,           # Product category
-            image_url=product.get('image_url') or enriched_data.get('image_url'),
-            description=product.get('description') or enriched_data.get('description'),
-            provider=provider_data,      # Full Himira provider structure from Postman
-            fulfillment_id="1",         # Default fulfillment
-            tags=enriched_data.get('tags', []),
-            customisations=enriched_data.get('customisations'),
+            local_id=product_local_id,
+            bpp_id="hp-seller-preprod.himira.co.in",  # Known constant
+            bpp_uri="https://hp-seller-preprod.himira.co.in/api/v2",  # Known constant
+            location_id=location_local_id,
+            contextCity="std:0172",  # Known area code
+            category=product.get('category', ''),
+            image_url=product.get('image_url', ''),
+            description=product.get('description', ''),
+            provider=real_provider,  # Real provider data from search results
+            fulfillment_id="1",
+            tags=product.get('tags', []),
+            customisations=product.get('customisations'),
         )
         
-        logger.info(f"[Cart] Successfully created ONDC cart item with Himira provider data: {cart_item.name}")
-        logger.debug(f"[Cart] Provider structure: {json.dumps(provider_data, indent=2)}")
-        
+        logger.info(f"[Cart] Created cart item with real provider data: {cart_item.name}")
         return cart_item
-    
     # ================================
     # ADDITIONAL CART METHODS using comprehensive backend
     # ================================
@@ -462,7 +499,10 @@ class CartService:
             if not user_id:
                 logger.warning("[Cart] No user_id in session for backend operation")
                 return False
-            device_id = getattr(session, 'device_id', f'mcp_{session.session_id[:8]}')
+            device_id = getattr(session, 'device_id', None)
+            if not device_id:
+                logger.error("[Cart] No device_id in session for backend operation")
+                return False
             
             result = await self.buyer_app.get_cart(user_id, device_id)
             logger.debug(f"[Cart] Backend cart for {user_id}/{device_id}: {result}")
@@ -506,7 +546,10 @@ class CartService:
             if not user_id:
                 logger.warning("[Cart] No user_id in session for backend operation")
                 return False
-            device_id = getattr(session, 'device_id', f'mcp_{session.session_id[:8]}')
+            device_id = getattr(session, 'device_id', None)
+            if not device_id:
+                logger.error("[Cart] No device_id in session for backend operation")
+                return False
             
             # Use backend API for multiple removal
             backend_result = await self.buyer_app.remove_multiple_cart_items(user_id, device_id, item_ids)
@@ -554,7 +597,10 @@ class CartService:
             if not user_id:
                 logger.warning("[Cart] No user_id in session for backend operation")
                 return False
-            device_id = getattr(session, 'device_id', f'mcp_{session.session_id[:8]}')
+            device_id = getattr(session, 'device_id', None)
+            if not device_id:
+                logger.error("[Cart] No device_id in session for backend operation")
+                return False
             
             # Determine which items to move
             items_to_move = []

@@ -20,7 +20,7 @@ import hashlib
 import hmac
 import logging
 
-from ..buyer_backend_client import BuyerBackendClient
+from ..buyer_backend_client import BuyerBackendClient, get_buyer_backend_client
 from ..models.session import Session
 from ..utils.logger import get_logger
 
@@ -66,7 +66,7 @@ class PaymentService:
         Args:
             buyer_backend_client: Comprehensive client for backend API calls
         """
-        self.buyer_app = buyer_backend_client or BuyerBackendClient()
+        self.buyer_app = buyer_backend_client or get_buyer_backend_client()
         self.payment_attempts = {}  # Track payment attempts per session
         logger.info("PaymentService initialized with multi-gateway support (RazorPay, JusPay, COD)")
     

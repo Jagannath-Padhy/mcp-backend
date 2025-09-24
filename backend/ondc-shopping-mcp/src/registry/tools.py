@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from mcp.types import Tool
 
 # Import all adapters
-from ..mcp_adapters import (
+from src.mcp_adapters import (
     # Cart adapters
     add_to_cart as add_to_cart_adapter,
     view_cart as view_cart_adapter,
@@ -219,6 +219,7 @@ class ToolRegistry:
                 "delivery_city": {"type": "string", "description": "Delivery city"},
                 "delivery_state": {"type": "string", "description": "Delivery state"},
                 "delivery_pincode": {"type": "string", "description": "Delivery pincode"},
+                "delivery_gps": {"type": "string", "description": "GPS coordinates in 'latitude,longitude' format (e.g., '12.9716,77.5946')"},
                 "session_id": {"type": "string", "description": "Optional session ID"}
             },
             category="order"

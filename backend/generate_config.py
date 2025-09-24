@@ -64,7 +64,7 @@ def generate_config():
                         # Logging
                         'LOG_LEVEL': os.getenv('LOG_LEVEL', 'INFO'),
                         'LOG_FILE': '/app/logs/mcp_operations.log',
-                        'DEBUG_CURL_LOGGING': 'false',
+                        'DEBUG_CURL_LOGGING': 'true',
                         'MCP_DEBUG_PAYMENT_LOGS': 'false'
                     }
                 }

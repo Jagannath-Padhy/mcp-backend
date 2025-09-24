@@ -65,7 +65,7 @@ class BiapContextFactory:
     def create(self, context_params: Dict) -> Dict:
         """
         Create BIAP-compatible ONDC context structure
-        Matches the Node.js ContextFactory.create() method
+        Returns simplified format for SELECT operations to match backend expectations
         
         Args:
             context_params: Dictionary containing:
@@ -80,7 +80,7 @@ class BiapContextFactory:
                 - domain: Domain override (optional)
         
         Returns:
-            BIAP-compatible ONDC context
+            Simplified context for SELECT, full context for other operations
         """
         # Extract parameters
         action = context_params.get('action', 'select')
@@ -101,7 +101,15 @@ class BiapContextFactory:
         final_city = self.get_city_by_pincode(pincode, city, action)  # Pass action for proper city formatting
         logger.info(f"[BiapContext] Final city value for {action}: {final_city}")
         
-        # Create context structure matching BIAP Node.js
+        # For SELECT operations: Return simplified context to match backend expectations
+        if action == 'select':
+            logger.info("[BiapContext] SELECT operation - returning simplified context")
+            return {
+                "domain": domain,
+                "city": final_city
+            }
+        
+        # Full ONDC context structure for other operations (init, confirm, etc.)
         context = {
             "domain": domain,
             "country": self.country,

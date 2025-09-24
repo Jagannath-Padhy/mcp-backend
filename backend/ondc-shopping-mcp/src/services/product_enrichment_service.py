@@ -4,16 +4,9 @@ from typing import Dict, List, Optional, Any
 import logging
 
 from ..models.session import CartItem
-from ..buyer_backend_client import BuyerBackendClient
+from ..buyer_backend_client import BuyerBackendClient, get_buyer_backend_client
 from ..utils.logger import get_logger
-from ..utils.himira_provider_constants import (
-    enrich_cart_item_with_provider,
-    create_minimal_provider_for_cart,
-    HIMIRA_PROVIDER_ID,
-    HIMIRA_LOCATION_LOCAL_ID,
-    HIMIRA_BPP_ID,
-    HIMIRA_BPP_URI
-)
+# Removed fake data imports - using only real data from cart items
 
 logger = get_logger(__name__)
 
@@ -26,7 +19,7 @@ class ProductEnrichmentService:
     
     def __init__(self, buyer_backend_client: Optional[BuyerBackendClient] = None):
         """Initialize product enrichment service"""
-        self.buyer_app = buyer_backend_client or BuyerBackendClient()
+        self.buyer_app = buyer_backend_client or get_buyer_backend_client()
         logger.info("ProductEnrichmentService initialized")
     
     async def enrich_cart_items(self, cart_items: List[CartItem], user_id: Optional[str] = None) -> List[CartItem]:
@@ -129,58 +122,13 @@ class ProductEnrichmentService:
             except Exception as e:
                 logger.debug(f"[ProductEnrichment] Individual enrichment failed for {item.id}: {e}")
         
-        # Step 3: Apply enrichment if data available, otherwise use existing item data
+        # Step 3: Apply enrichment if data available, otherwise return item as-is
         if enriched_data:
             return self._apply_enrichment_data(item, enriched_data)
         else:
-            # If enrichment fails, ensure item has required BIAP fields from existing data
-            logger.debug(f"[ProductEnrichment] Using existing cart data for item {item.id}")
-            # Create proper BIAP structure with fallback data
-            return self._create_biap_compatible_item(item)
-    
-    def _create_biap_compatible_item(self, item: CartItem) -> CartItem:
-        """
-        Create BIAP-compatible item structure using Himira provider constants
-        Used when API enrichment fails but we need proper ONDC structure from Postman
-        """
-        logger.info(f"[ProductEnrichment] Creating Himira BIAP structure for {item.name}")
-        
-        # Use Himira provider data from Postman collection
-        # This ensures we have the exact structure the backend expects
-        item_data = {
-            'name': item.name,
-            'price': item.price,
-            'description': item.description or '',
-            'image_url': item.image_url or '',
-            'category': item.category or 'Tinned and Processed Food',
-            'local_id': item.local_id  # Preserve existing local_id if available
-        }
-        
-        # Enrich with Himira provider structure from Postman collection
-        enriched_data = enrich_cart_item_with_provider(item_data, item.category or 'Tinned and Processed Food')
-        
-        # Update item with proper Himira ONDC structure
-        item.id = enriched_data['id']  # Full ONDC ID
-        item.local_id = enriched_data['local_id']  # UUID
-        item.bpp_id = enriched_data['bpp_id']  # Himira BPP ID
-        item.bpp_uri = enriched_data['bpp_uri']  # Himira BPP URI
-        item.provider = enriched_data['provider']  # Full Himira provider structure
-        item.location_id = enriched_data['location_id']  # Himira location ID
-        item.contextCity = enriched_data['contextCity']  # std:0172
-        item.domain = enriched_data['domain']  # ONDC:RET10
-        item.fulfillment_id = enriched_data['fulfillment_id']  # "1"
-        item.tags = enriched_data.get('tags', [])
-        
-        # CRITICAL: Do NOT add product field! Backend creates it during enrichment.
-        # Frontend/Postman never send product field - backend handles it.
-        
-        logger.info(f"[ProductEnrichment] Updated {item.name} with Himira ONDC structure:")
-        logger.info(f"  - ID: {item.id}")
-        logger.info(f"  - BPP: {item.bpp_id}")
-        logger.info(f"  - Provider: {item.provider['id']}")
-        logger.info(f"  - Location: {item.location_id}")
-        
-        return item
+            # Cart item already has real provider data from search results
+            logger.debug(f"[ProductEnrichment] API enrichment not available, using existing real data for item {item.id}")
+            return item
     
     def _find_item_in_batch_data(self, item: CartItem, batch_data: List[Dict]) -> Optional[Dict]:
         """
@@ -246,7 +194,7 @@ class ProductEnrichmentService:
                 product={
                     'subtotal': subtotal,
                     **item_details,
-                    'location_id': location_details.get('id') or location_details.get('local_id') or HIMIRA_LOCATION_LOCAL_ID
+                    'location_id': location_details.get('id') or location_details.get('local_id')
                 },
                 
                 # Enriched provider details with proper BIAP structure
@@ -271,32 +219,49 @@ class ProductEnrichmentService:
     def _create_provider_structure(self, provider_details: Dict, location_details: Dict, 
                                    item: CartItem, bpp_id: str) -> Dict:
         """
-        Create proper ONDC provider structure using Himira constants from Postman
-        Ensures exact compatibility with backend expectations
+        Preserve real provider structure from API response - NO fake data generation
+        
+        Args:
+            provider_details: Real provider data from API
+            location_details: Real location data from API
+            item: CartItem to update
+            bpp_id: BPP ID from context
+            
+        Returns:
+            Real provider structure from API response
+            
+        Raises:
+            ValueError: If provider data is missing or invalid
         """
-        logger.info(f"[ProductEnrichment] Creating provider structure using Himira constants")
+        if not provider_details or not provider_details.get('id'):
+            error_msg = f"Missing real provider data for item {item.name}"
+            logger.error(f"[ProductEnrichment] {error_msg}")
+            raise ValueError(error_msg)
         
-        # Use Himira provider structure directly from Postman collection
-        # This is more reliable than trying to construct from API responses
-        if provider_details and provider_details.get('id') == HIMIRA_PROVIDER_ID:
-            # API returned Himira data, use it directly
-            logger.info(f"[ProductEnrichment] Using API provider data for Himira")
-            provider_structure = provider_details
-        else:
-            # Fallback to our constants from Postman collection
-            logger.info(f"[ProductEnrichment] Using Himira constants from Postman collection")
-            provider_structure = create_minimal_provider_for_cart()
+        logger.info(f"[ProductEnrichment] Using REAL provider data from API")
+        logger.info(f"  - Provider ID: {provider_details.get('id')}")
+        logger.info(f"  - Location ID: {location_details.get('id') if location_details else 'None'}")
         
-        # Ensure location_id is available for cart_service
-        location_id = HIMIRA_LOCATION_LOCAL_ID
-        if provider_structure.get('locations') and len(provider_structure['locations']) > 0:
+        # Use real provider structure directly from API
+        provider_structure = provider_details
+        
+        # Extract location_id for cart_service
+        location_id = None
+        if location_details:
+            location_id = location_details.get('local_id') or location_details.get('id')
+        elif provider_structure.get('locations') and len(provider_structure['locations']) > 0:
             first_location = provider_structure['locations'][0]
-            location_id = first_location.get('local_id') or first_location.get('id') or HIMIRA_LOCATION_LOCAL_ID
+            location_id = first_location.get('local_id') or first_location.get('id')
+        
+        if not location_id:
+            error_msg = f"Missing location data for item {item.name}"
+            logger.error(f"[ProductEnrichment] {error_msg}")
+            raise ValueError(error_msg)
         
         # Set location_id on item for extraction by cart_service
         item.location_id = location_id
         
-        logger.info(f"[ProductEnrichment] Provider structure ready - Provider: {provider_structure['id']}, Location: {location_id}")
+        logger.info(f"[ProductEnrichment] Real provider structure preserved - Provider: {provider_structure['id']}, Location: {location_id}")
         return provider_structure
 
 

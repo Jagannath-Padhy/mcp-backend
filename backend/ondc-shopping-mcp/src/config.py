@@ -84,11 +84,8 @@ class PaymentConfig:
     payment_provider: str = "razorpay_mock"  # Mock provider identifier
 
 
-@dataclass
-class GuestConfig:
-    """Guest user configuration for consistent guest journeys"""
-    user_id: str = "guestUser"
-    device_id: str = "d58dc5e2119ae5430b9321602618c878"
+# REMOVED: GuestConfig - No more guest mode
+# Users must provide real Himira credentials
     
     
 @dataclass
@@ -152,11 +149,8 @@ class Config:
             payment_provider=os.getenv("MCP_PAYMENT_PROVIDER", "razorpay_mock")
         )
         
-        # Guest User Configuration
-        self.guest = GuestConfig(
-            user_id=os.getenv("GUEST_USER_ID", "guestUser"),
-            device_id=os.getenv("GUEST_DEVICE_ID", "d58dc5e2119ae5430b9321602618c878")
-        )
+        # REMOVED: Guest User Configuration - No more guest mode
+        # All users must provide real Himira credentials
         
         # Logging Configuration
         # Always log to file for better observability

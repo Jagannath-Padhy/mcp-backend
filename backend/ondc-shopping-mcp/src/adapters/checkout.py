@@ -1,14 +1,15 @@
 """ONDC checkout flow operations for MCP adapters"""
 
 from typing import Dict, Any, Optional
-from .utils import (
+import re
+from src.adapters.utils import (
     get_persistent_session, 
     save_persistent_session, 
     extract_session_id, 
     format_mcp_response,
     get_services
 )
-from ..utils.logger import get_logger
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -17,11 +18,115 @@ services = get_services()
 checkout_service = services['checkout_service']
 
 
+def validate_gps_coordinates(gps_string: Optional[str]) -> Dict[str, Any]:
+    """
+    Validate GPS coordinates format and return validation result
+    
+    Args:
+        gps_string: GPS coordinates in "lat,lng" format
+        
+    Returns:
+        Dict with validation result and parsed coordinates
+    """
+    if not gps_string:
+        return {
+            'valid': False,
+            'error': 'GPS coordinates required',
+            'lat': None,
+            'lng': None
+        }
+    
+    # Check format: "lat,lng" with optional spaces
+    gps_pattern = r'^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$'
+    match = re.match(gps_pattern, gps_string.strip())
+    
+    if not match:
+        return {
+            'valid': False,
+            'error': 'Invalid GPS format. Use: latitude,longitude',
+            'lat': None,
+            'lng': None
+        }
+    
+    try:
+        lat = float(match.group(1))
+        lng = float(match.group(2))
+        
+        # Validate coordinate ranges
+        if not (-90 <= lat <= 90):
+            return {
+                'valid': False,
+                'error': 'Latitude must be between -90 and 90',
+                'lat': lat,
+                'lng': lng
+            }
+        
+        if not (-180 <= lng <= 180):
+            return {
+                'valid': False,
+                'error': 'Longitude must be between -180 and 180',
+                'lat': lat,
+                'lng': lng
+            }
+        
+        return {
+            'valid': True,
+            'error': None,
+            'lat': lat,
+            'lng': lng
+        }
+        
+    except ValueError:
+        return {
+            'valid': False,
+            'error': 'Invalid numeric values in GPS coordinates',
+            'lat': None,
+            'lng': None
+        }
+
+
+def get_gps_help_message(delivery_city: str, delivery_pincode: str) -> str:
+    """Generate helpful GPS coordinates message for user"""
+    examples = {
+        'bangalore': '12.9716,77.5946',
+        'chandigarh': '30.745765,76.653633',
+        'delhi': '28.6139,77.2090',
+        'mumbai': '19.0760,72.8777',
+        'pune': '18.5204,73.8567',
+        'hyderabad': '17.3850,78.4867'
+    }
+    
+    city_lower = delivery_city.lower()
+    city_example = examples.get(city_lower, '12.9716,77.5946')  # Default to Bangalore
+    
+    return f"""📍 **GPS Coordinates Required**
+
+For accurate delivery to {delivery_city} {delivery_pincode}, please provide GPS coordinates:
+
+**Format:** latitude,longitude
+**Example for {delivery_city}:** {city_example}
+
+**How to get GPS coordinates:**
+1. Open Google Maps
+2. Right-click your delivery location
+3. Click the coordinates that appear to copy them
+4. Paste here in format: lat,lng
+
+**Common Examples:**
+• Bangalore: 12.9716,77.5946
+• Chandigarh: 30.745765,76.653633  
+• Delhi: 28.6139,77.2090
+• Mumbai: 19.0760,72.8777
+
+**Please provide GPS coordinates for your exact delivery location.**"""
+
+
 async def select_items_for_order(
+    delivery_city: str,
+    delivery_state: str,
+    delivery_pincode: str,
+    delivery_gps: Optional[str] = None,
     session_id: Optional[str] = None,
-    delivery_city: Optional[str] = None,
-    delivery_state: Optional[str] = None,
-    delivery_pincode: Optional[str] = None,
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -68,18 +173,35 @@ async def select_items_for_order(
 
 To get delivery quotes, I need to collect your address first.
 
- **Please use the 'set_delivery_address' tool first:**
-• This will ask for your city, state, and pincode
-• Then you can proceed with getting delivery quotes
+ **Please provide:**
+• city='Bangalore' 
+• state='Karnataka' 
+• pincode='560001'
+• delivery_gps='12.9716,77.5946'
 
 Or provide delivery location directly:
-• Format: city='Bangalore', state='Karnataka', pincode='560001'""",
+• Format: city='Bangalore', state='Karnataka', pincode='560001', delivery_gps='12.9716,77.5946'""",
                 session_obj.session_id
             )
         
-        # Call consolidated checkout service
+        # Validate GPS coordinates
+        gps_validation = validate_gps_coordinates(delivery_gps)
+        if not gps_validation['valid']:
+            # GPS missing or invalid - provide helpful error message
+            if delivery_gps:
+                error_msg = f" **GPS Validation Error**\n\n{gps_validation['error']}\n\n{get_gps_help_message(delivery_city, delivery_pincode)}"
+            else:
+                error_msg = get_gps_help_message(delivery_city, delivery_pincode)
+            
+            return format_mcp_response(
+                False,
+                error_msg,
+                session_obj.session_id
+            )
+        
+        # Call consolidated checkout service with validated GPS
         result = await checkout_service.select_items_for_order(
-            session_obj, delivery_city, delivery_state, delivery_pincode
+            session_obj, delivery_city, delivery_state, delivery_pincode, delivery_gps
         )
         
         # Save enhanced session with conversation tracking
@@ -104,15 +226,15 @@ Or provide delivery location directly:
 
 
 async def initialize_order(
-    session_id: Optional[str] = None,
-    customer_name: Optional[str] = None,
-    delivery_address: Optional[str] = None,
-    phone: Optional[str] = None,
-    email: Optional[str] = None,
-    payment_method: Optional[str] = 'cod',
+    customer_name: str,
+    delivery_address: str,
+    phone: str,
+    email: str,
+    payment_method: str = 'razorpay',
     city: Optional[str] = None,
     state: Optional[str] = None,
     pincode: Optional[str] = None,
+    session_id: Optional[str] = None,
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -127,16 +249,20 @@ async def initialize_order(
         # Get enhanced session with conversation tracking
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="initialize_order", **kwargs)
         
-        # GUEST MODE: Authentication check removed for guest journey
-        # Guest users can proceed without authentication
-        logger.info(f"[GUEST MODE] Proceeding with guest order initialization")
+        # AUTHENTICATED MODE: Users must have provided real Himira credentials
+        # All operations require valid userId and deviceId from initialize_shopping
+        logger.info(f"[AUTHENTICATED MODE] Proceeding with authenticated order initialization")
         
-        # Ensure guest mode is active
-        if not session_obj.user_id:
-            session_obj.user_id = "guestUser"
-        if not session_obj.device_id:
-            from ..config import config
-            session_obj.device_id = config.guest.device_id
+        # Validate user credentials exist (set in initialize_shopping)
+        if not session_obj.user_id or not session_obj.device_id:
+            return format_mcp_response(
+                False,
+                "❌ **Authentication Required**\n\n"
+                "Please provide your Himira credentials first:\n\n"
+                "`initialize_shopping(userId='your_user_id', deviceId='your_device_id')`\n\n"
+                "This ensures proper access to your cart and order history.",
+                session_obj.session_id
+            )
         
         # Validate session is in SELECT stage
         if session_obj.checkout_state.stage.value != 'select':
@@ -202,8 +328,9 @@ To initialize your order, I need your complete information:
 
 
 async def create_payment(
+    payment_method: str,
+    amount: float,
     session_id: Optional[str] = None,
-    payment_method: Optional[str] = 'razorpay',
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -274,8 +401,8 @@ async def create_payment(
 
 
 async def confirm_order(
-    session_id: Optional[str] = None, 
-    payment_status: Optional[str] = 'PENDING',
+    payment_status: str = 'PAID',
+    session_id: Optional[str] = None,
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -290,16 +417,20 @@ async def confirm_order(
         # Get enhanced session with conversation tracking
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="confirm_order", **kwargs)
         
-        # GUEST MODE: Mock confirmation allowed without authentication
-        # This is a MOCK confirmation for testing only
-        logger.info(f"[GUEST MODE] Proceeding with MOCK order confirmation")
+        # AUTHENTICATED MODE: Users must have provided real Himira credentials
+        # This confirms orders for authenticated users only
+        logger.info(f"[AUTHENTICATED MODE] Proceeding with authenticated order confirmation")
         
-        # Ensure guest mode is active
-        if not session_obj.user_id:
-            session_obj.user_id = "guestUser"
-        if not session_obj.device_id:
-            from ..config import config
-            session_obj.device_id = config.guest.device_id
+        # Validate user credentials exist (set in initialize_shopping)
+        if not session_obj.user_id or not session_obj.device_id:
+            return format_mcp_response(
+                False,
+                "❌ **Authentication Required**\n\n"
+                "Please provide your Himira credentials first:\n\n"
+                "`initialize_shopping(userId='your_user_id', deviceId='your_device_id')`\n\n"
+                "Orders can only be confirmed with valid user credentials.",
+                session_obj.session_id
+            )
         
         # Validate session is in INIT stage
         if session_obj.checkout_state.stage.value != 'init':
