@@ -15,220 +15,10 @@ class CheckoutStage(Enum):
     CONFIRMED = "confirmed"     # ONDC CONFIRM step - order confirmed
 
 
-@dataclass
-class CartItem:
-    """BIAP-compatible cart item with full ONDC fields matching BIAP Node.js structure"""
-    id: str
-    name: str
-    price: float
-    quantity: int
-    local_id: str                                 # BIAP requirement - used in SELECT API
-    bpp_id: str                                  # BIAP requirement - from product enrichment
-    bpp_uri: str                                 # BIAP requirement - from product enrichment
-    contextCity: Optional[str] = None            # BIAP requirement - from enrichment
-    category: Optional[str] = None
-    image_url: Optional[str] = None
-    description: Optional[str] = None
-    product: Optional[Dict[str, Any]] = None     # BIAP enriched product details with subtotal
-    provider: Optional[Dict[str, Any]] = None    # BIAP provider structure with locations array
-    location_id: Optional[str] = None            # BIAP requirement - provider location ID
-    fulfillment_id: Optional[str] = None         # Required for INIT operation
-    parent_item_id: Optional[str] = None         # For complex/bundled items
-    tags: Optional[List[Dict[str, Any]]] = None  # Item metadata and type information
-    customisations: Optional[List[Dict[str, Any]]] = None  # Item customization options
-    
-    @property
-    def provider_id(self) -> str:
-        """Extract provider ID from provider object for backward compatibility"""
-        if self.provider and isinstance(self.provider, dict):
-            return self.provider.get('id') or self.provider.get('local_id', 'unknown')
-        return 'unknown'
-    
-    @property
-    def subtotal(self) -> float:
-        """Calculate subtotal for this item"""
-        return self.price * self.quantity
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization"""
-        return {
-            'id': self.id,
-            'name': self.name,
-            'price': self.price,
-            'quantity': self.quantity,
-            'local_id': self.local_id,
-            'bpp_id': self.bpp_id,
-            'bpp_uri': self.bpp_uri,
-            'contextCity': self.contextCity,
-            'category': self.category,
-            'image_url': self.image_url,
-            'description': self.description,
-            'product': self.product,
-            'provider': self.provider,
-            'location_id': self.location_id,
-            'fulfillment_id': self.fulfillment_id,
-            'parent_item_id': self.parent_item_id,
-            'tags': self.tags,
-            'customisations': self.customisations,
-            'subtotal': self.subtotal,
-            'provider_id': self.provider_id  # Computed property
-        }
-    
-    def to_biap_select_format(self) -> Dict[str, Any]:
-        """Convert to BIAP SELECT API format"""
-        return {
-            'id': self.id,
-            'local_id': self.local_id,
-            'bpp_id': self.bpp_id,
-            'bpp_uri': self.bpp_uri,
-            'contextCity': self.contextCity,
-            'product': self.product,
-            'provider': self.provider,
-            'quantity': {'count': self.quantity}
-        }
-    
-    def to_biap_init_format(self) -> Dict[str, Any]:
-        """Convert to BIAP INIT API format"""
-        item_data = {
-            'id': self.local_id,
-            'quantity': self.quantity,
-            'location_id': self.provider.get('locations', [{}])[0].get('local_id') if self.provider else None,
-            'fulfillment_id': self.fulfillment_id,
-            'product': self.product
-        }
-        
-        # Add parent_item_id if present
-        if self.parent_item_id:
-            item_data['parent_item_id'] = self.parent_item_id
-        
-        # Add tags if present
-        if self.tags:
-            item_data['tags'] = self.tags
-            
-        return item_data
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'CartItem':
-        """Create CartItem from dictionary"""
-        return cls(
-            id=data['id'],
-            name=data['name'],
-            price=float(data['price']),
-            quantity=int(data['quantity']),
-            local_id=data['local_id'],
-            bpp_id=data['bpp_id'],
-            bpp_uri=data['bpp_uri'],
-            contextCity=data.get('contextCity'),
-            category=data.get('category'),
-            image_url=data.get('image_url'),
-            description=data.get('description'),
-            product=data.get('product'),
-            provider=data.get('provider'),
-            location_id=data.get('location_id'),
-            fulfillment_id=data.get('fulfillment_id'),
-            parent_item_id=data.get('parent_item_id'),
-            tags=data.get('tags'),
-            customisations=data.get('customisations')
-        )
-    
-    @classmethod
-    def create_from_enriched_data(cls, base_item: 'CartItem', enriched_data: Dict[str, Any]) -> 'CartItem':
-        """Create CartItem with enriched data from BIAP protocolGetItemList/protocolGetItemDetails"""
-        return cls(
-            id=base_item.id,
-            name=base_item.name,
-            price=base_item.price,
-            quantity=base_item.quantity,
-            local_id=base_item.local_id,
-            # Update with enriched data from BIAP
-            bpp_id=enriched_data.get('context', {}).get('bpp_id', base_item.bpp_id),
-            bpp_uri=enriched_data.get('context', {}).get('bpp_uri', base_item.bpp_uri),
-            contextCity=enriched_data.get('context', {}).get('city'),
-            category=base_item.category,
-            image_url=base_item.image_url,
-            description=base_item.description,
-            # Enriched product details
-            product={
-                'subtotal': enriched_data.get('item_details', {}).get('price', {}).get('value', base_item.price),
-                **enriched_data.get('item_details', {})
-            },
-            # Enriched provider details
-            provider={
-                'locations': [enriched_data.get('location_details', {})],
-                **enriched_data.get('provider_details', {})
-            }
-        )
+# CartItem class removed - cart data now stored purely in backend
 
 
-@dataclass
-class Cart:
-    """Shopping cart with items and calculations"""
-    items: List[CartItem] = field(default_factory=list)
-    
-    @property
-    def total_items(self) -> int:
-        """Total number of items in cart"""
-        return sum(item.quantity for item in self.items)
-    
-    @property
-    def total_value(self) -> float:
-        """Total value of cart"""
-        return sum(item.subtotal for item in self.items)
-    
-    def add_item(self, item: CartItem) -> None:
-        """Add item to cart or update quantity if exists"""
-        existing = self.find_item(item.id)
-        if existing:
-            existing.quantity += item.quantity
-        else:
-            self.items.append(item)
-    
-    def remove_item(self, item_id: str) -> bool:
-        """Remove item from cart"""
-        for i, item in enumerate(self.items):
-            if item.id == item_id:
-                del self.items[i]
-                return True
-        return False
-    
-    def update_quantity(self, item_id: str, quantity: int) -> bool:
-        """Update item quantity"""
-        item = self.find_item(item_id)
-        if item and quantity > 0:
-            item.quantity = quantity
-            return True
-        elif item and quantity == 0:
-            return self.remove_item(item_id)
-        return False
-    
-    def find_item(self, item_id: str) -> Optional[CartItem]:
-        """Find item in cart by ID"""
-        for item in self.items:
-            if item.id == item_id:
-                return item
-        return None
-    
-    def clear(self) -> None:
-        """Clear all items from cart"""
-        self.items.clear()
-    
-    def is_empty(self) -> bool:
-        """Check if cart is empty"""
-        return len(self.items) == 0
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization"""
-        return {
-            'items': [item.to_dict() for item in self.items],
-            'total_items': self.total_items,
-            'total_value': self.total_value
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Cart':
-        """Create Cart from dictionary"""
-        items = [CartItem.from_dict(item) for item in data.get('items', [])]
-        return cls(items=items)
+# Cart class removed - cart data now stored purely in backend
 
 
 @dataclass
@@ -336,7 +126,7 @@ class Session:
     session_id: str = field(default_factory=lambda: f"session_{uuid.uuid4().hex[:16]}")
     user_id: Optional[str] = None  # Will be set from authenticated user
     device_id: str = field(default_factory=lambda: f"mcp_{uuid.uuid4().hex[:16]}")
-    cart: Cart = field(default_factory=Cart)
+    # cart removed - now stored purely in backend
     checkout_state: CheckoutState = field(default_factory=CheckoutState)
     preferences: UserPreferences = field(default_factory=UserPreferences)
     history: List[Dict[str, Any]] = field(default_factory=list)
@@ -368,7 +158,7 @@ class Session:
             'session_id': self.session_id,
             'user_id': self.user_id,
             'device_id': self.device_id,
-            'cart': self.cart.to_dict(),
+            # cart removed - stored in backend only
             'checkout_state': self.checkout_state.to_dict(),
             'preferences': self.preferences.to_dict(),
             'history': self.history,
@@ -388,7 +178,7 @@ class Session:
             session_id=data['session_id'],
             user_id=data.get('user_id'),  # No default, must be from auth
             device_id=data.get('device_id'),
-            cart=Cart.from_dict(data.get('cart', {})),
+            # cart removed - stored in backend only
             checkout_state=CheckoutState.from_dict(data.get('checkout_state', {})),
             preferences=UserPreferences.from_dict(data.get('preferences', {})),
             history=data.get('history', []),

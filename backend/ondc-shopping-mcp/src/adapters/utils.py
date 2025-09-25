@@ -160,7 +160,7 @@ def format_products_for_display(products: List[Dict[str, Any]]) -> List[Dict[str
                         'quantity': item_details.get('quantity', {}).get('available', {}).get('count', '0')
                     },
                     'fulfillment': product.get('fulfillment_details', []),
-                    'location': location_details[0] if isinstance(location_details, list) and location_details else location_details if isinstance(location_details, dict) else {},
+                    'location': location_details[0] if isinstance(location_details, list) and len(location_details) > 0 else (location_details if isinstance(location_details, dict) else {}),
                     '_raw': product  # Keep raw data for cart operations
                 }
             else:

@@ -64,11 +64,24 @@ class ToolRegistry:
             description="START SHOPPING: Initialize new shopping session",
             adapter=initialize_shopping_adapter,
             parameters={
-                "session_id": {
+                "userId": {
+                    "type": "string", 
+                    "description": "Your Himira user ID from the frontend (required)"
+                },
+                "deviceId": {
                     "type": "string",
-                    "description": "Optional session ID for persistence"
+                    "description": "Your device ID from the frontend (required)" 
+                },
+                "user_preferences": {
+                    "type": "object",
+                    "description": "Optional user preferences"
+                },
+                "location": {
+                    "type": "string",
+                    "description": "Optional location preference"
                 }
             },
+            required_params=["userId", "deviceId"],
             category="session"
         ))
         

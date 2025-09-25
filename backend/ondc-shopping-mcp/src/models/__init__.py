@@ -2,8 +2,6 @@
 
 from .session import (
     Session,
-    Cart,
-    CartItem,
     CheckoutState,
     UserPreferences,
     DeliveryInfo
@@ -11,8 +9,6 @@ from .session import (
 
 __all__ = [
     'Session',
-    'Cart',
-    'CartItem',
     'CheckoutState',
     'UserPreferences',
     'DeliveryInfo'

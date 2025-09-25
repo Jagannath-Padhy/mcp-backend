@@ -79,22 +79,11 @@ async def add_to_cart(item: Optional[Dict] = None, quantity: int = 1,
                 session_obj.session_id
             )
         
-        # Add item using service with error handling
+        # Add item using pure backend service
         try:
-            # First add to local cart
+            # Pure backend add - no local storage
             success, message = await cart_service.add_item(session_obj, item, quantity)
-            logger.info(f"[Cart] Add item result - Success: {success}, Message: {message}")
-            
-            # If local add succeeded and user is authenticated, sync with backend
-            if success and session_obj.user_authenticated and session_obj.user_id:
-                logger.info(f"[Cart] User authenticated, adding to backend cart")
-                backend_success, backend_msg = await cart_service.add_item_to_backend(session_obj, item, quantity)
-                logger.info(f"[Cart] Backend add result - Success: {backend_success}, Message: {backend_msg}")
-                
-                # Use backend result if available
-                if not backend_success:
-                    # Backend failed, but local succeeded - warn user
-                    message = f" {message}\n(Note: Backend sync failed - {backend_msg})"
+            logger.info(f"[Cart] Backend add result - Success: {success}, Message: {message}")
             
         except Exception as e:
             logger.error(f"[Cart] Exception in cart_service.add_item: {e}")
@@ -105,7 +94,7 @@ async def add_to_cart(item: Optional[Dict] = None, quantity: int = 1,
             )
         
         # Get cart summary
-        cart_summary = cart_service.get_cart_summary(session_obj)
+        cart_summary = await cart_service.get_cart_summary(session_obj)
         
         # Save session with enhanced persistence
         save_persistent_session(session_obj, conversation_manager)
@@ -114,7 +103,7 @@ async def add_to_cart(item: Optional[Dict] = None, quantity: int = 1,
             success,
             message,
             session_obj.session_id,
-            cart_summary=cart_summary
+            cart=cart_summary
         )
         
     except Exception as e:
@@ -128,6 +117,7 @@ async def add_to_cart(item: Optional[Dict] = None, quantity: int = 1,
 
 async def view_cart(session_id: Optional[str] = None, **kwargs) -> Dict[str, Any]:
     """MCP adapter for view_cart"""
+    logger.error(f"[EMERGENCY DEBUG] view_cart called with session_id={session_id}")
     try:
         # Get enhanced session with conversation tracking
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="view_cart", **kwargs)
@@ -151,17 +141,47 @@ async def view_cart(session_id: Optional[str] = None, **kwargs) -> Dict[str, Any
             buyer_app = get_buyer_backend_client()
             backend_cart = await buyer_app.get_cart(session_obj.user_id, device_id)
             
-            if backend_cart and not backend_cart.get('error'):
+            # Handle backend response properly - backend returns list, not dict with error field
+            if backend_cart is not None and not (isinstance(backend_cart, dict) and backend_cart.get('error')):
                 logger.info(f"[Cart] Backend cart fetched successfully")
                 # TODO: Sync backend cart to local session if needed
         
-        # Get cart display
-        cart_display = cart_service.format_cart_display(session_obj)
-        cart_summary = cart_service.get_cart_summary(session_obj)
+        # Get cart display using pure backend service
+        try:
+            logger.debug(f"[Cart Debug] Starting view_cart for session {session_obj.session_id}")
+            success, cart_display, cart_items = await cart_service.view_cart(session_obj)
+            
+            if not success:
+                return format_mcp_response(
+                    False,
+                    f" {cart_display}",
+                    session_obj.session_id
+                )
+            
+            logger.debug(f"[Cart Debug] view_cart completed successfully with {len(cart_items)} items")
+        except Exception as e:
+            logger.error(f"[Cart Debug] Error in view_cart: {e}")
+            import traceback
+            logger.error(f"[Cart Debug] view_cart traceback: {traceback.format_exc()}")
+            return format_mcp_response(
+                False,
+                f" Failed to view cart: {str(e)}",
+                session_obj.session_id
+            )
         
-        # Save session with enhanced persistence
+        # Get cart summary from backend data
+        try:
+            cart_summary = await cart_service.get_cart_summary(session_obj)
+            logger.debug(f"[Cart Debug] get_cart_summary completed successfully")
+        except Exception as e:
+            logger.error(f"[Cart Debug] Error in get_cart_summary: {e}")
+            # Continue anyway - display is more important than summary
+            cart_summary = {'items': [], 'total_items': 0, 'total_value': 0.0, 'is_empty': True}
+        
+        # Save session with persistence
         save_persistent_session(session_obj, conversation_manager)
         
+        # Return successful cart view
         return format_mcp_response(
             True,
             cart_display,
@@ -191,7 +211,7 @@ async def remove_from_cart(item_id: str, session_id: Optional[str] = None, **kwa
         await cart_service.sync_with_backend(session_obj)
         
         # Get cart summary
-        cart_summary = cart_service.get_cart_summary(session_obj)
+        cart_summary = await cart_service.get_cart_summary(session_obj)
         
         # Save session with enhanced persistence
         save_persistent_session(session_obj, conversation_manager)
@@ -200,7 +220,7 @@ async def remove_from_cart(item_id: str, session_id: Optional[str] = None, **kwa
             success,
             message,
             session_obj.session_id,
-            cart_summary=cart_summary
+            cart=cart_summary
         )
         
     except Exception as e:
@@ -226,7 +246,7 @@ async def update_cart_quantity(item_id: str, quantity: int,
         await cart_service.sync_with_backend(session_obj)
         
         # Get cart summary
-        cart_summary = cart_service.get_cart_summary(session_obj)
+        cart_summary = await cart_service.get_cart_summary(session_obj)
         
         # Save session with enhanced persistence
         save_persistent_session(session_obj, conversation_manager)
@@ -235,7 +255,7 @@ async def update_cart_quantity(item_id: str, quantity: int,
             success,
             message,
             session_obj.session_id,
-            cart_summary=cart_summary
+            cart=cart_summary
         )
         
     except Exception as e:
@@ -281,7 +301,7 @@ async def get_cart_total(session_id: Optional[str] = None, **kwargs) -> Dict[str
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="get_cart_total", **kwargs)
         
         # Get cart summary
-        summary = cart_service.get_cart_summary(session_obj)
+        summary = await cart_service.get_cart_summary(session_obj)
         
         if summary['is_empty']:
             message = " Your cart is empty"

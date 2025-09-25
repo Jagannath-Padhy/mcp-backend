@@ -520,10 +520,39 @@ async def chat(request: Request, chat_req: ChatRequest):
         except Exception as e:
             logger.debug(f"Session context file cleanup failed (not critical): {e}")
 
+        # FIX: Extract actual device_id from session after MCP tool execution
+        # This ensures we return the correct device_id that was set by the MCP tool
+        try:
+            logger.info(f"[DEVICE_ID FIX] Attempting to extract device_id from session: {session_id}")
+            # Force reading from disk to get the latest session data updated by MCP tools
+            updated_session = session_service._load_from_disk(session_id)
+            logger.info(f"[DEVICE_ID FIX] Session retrieved from disk: {updated_session is not None}")
+            
+            if updated_session and updated_session.device_id:
+                # Use the actual device_id from the session (set by MCP tools)
+                actual_device_id = updated_session.device_id
+                logger.info(f"[DEVICE_ID FIX] Using actual device_id from session: {actual_device_id}")
+                logger.info(f"[DEVICE_ID FIX] Generated device_id was: {device_id}")
+                
+                # Also log if they're different to confirm the fix is working
+                if actual_device_id != device_id:
+                    logger.info(f"[DEVICE_ID FIX] ✅ SUCCESS: Device ID corrected from generated to user-provided")
+                else:
+                    logger.info(f"[DEVICE_ID FIX] ⚠️ WARNING: Device IDs match, might be using fallback")
+            else:
+                # Fallback to generated device_id if session lookup fails
+                actual_device_id = device_id
+                logger.info(f"[DEVICE_ID FIX] Fallback to generated device_id: {actual_device_id}")
+                if updated_session:
+                    logger.info(f"[DEVICE_ID FIX] Session exists but device_id is: {updated_session.device_id}")
+        except Exception as e:
+            logger.error(f"[DEVICE_ID FIX] Failed to extract device_id from session, using generated: {e}")
+            actual_device_id = device_id
+
         return ChatResponse(
             response=response,
             session_id=session_id,
-            device_id=device_id,
+            device_id=actual_device_id,
             timestamp=datetime.now(),
             data=structured_data,
             context_type=context_type,

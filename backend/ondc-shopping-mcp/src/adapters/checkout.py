@@ -16,6 +16,7 @@ logger = get_logger(__name__)
 # Get services
 services = get_services()
 checkout_service = services['checkout_service']
+cart_service = services['cart_service']
 
 
 def validate_gps_coordinates(gps_string: Optional[str]) -> Dict[str, Any]:
@@ -142,8 +143,9 @@ async def select_items_for_order(
         # Get enhanced session with conversation tracking
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="select_items_for_order", **kwargs)
         
-        # Validate cart exists
-        if session_obj.cart.is_empty():
+        # Validate cart exists using backend cart service
+        cart_summary = await cart_service.get_cart_summary(session_obj)
+        if cart_summary['is_empty']:
             return format_mcp_response(
                 False,
                 ' Cart is empty. Please add items first.',

@@ -13,6 +13,7 @@ from ..data_models.biap_context_factory import get_biap_context_factory
 from ..services.product_enrichment_service import get_product_enrichment_service
 from ..services.biap_validation_service import get_biap_validation_service
 from ..services.payment_mock_service import mock_payment_service
+from ..services.cart_service import CartService
 from ..utils.city_code_mapping import get_city_code_by_pincode
 from ..utils.logger import get_logger
 from ..config import config
@@ -31,17 +32,19 @@ logger = get_logger(__name__)
 class CheckoutService:
     """BIAP-compatible consolidated ONDC checkout service with 3 optimized methods"""
     
-    def __init__(self, buyer_backend_client: Optional[BuyerBackendClient] = None):
+    def __init__(self, buyer_backend_client: Optional[BuyerBackendClient] = None, cart_service: Optional[CartService] = None):
         """
         Initialize checkout service with BIAP-compatible services
         
         Args:
             buyer_backend_client: Client for backend API calls
+            cart_service: Service for backend cart operations
         """
         self.buyer_app = buyer_backend_client or get_buyer_backend_client()
         self.context_factory = get_biap_context_factory()
         self.product_enrichment = get_product_enrichment_service()
         self.validation = get_biap_validation_service()
+        self.cart_service = cart_service
         logger.info("CheckoutService initialized with BIAP-compatible services")
     
     async def _poll_for_response(
@@ -154,8 +157,9 @@ class CheckoutService:
         Returns:
             Quote and fulfillment options from ONDC SELECT
         """
-        # Validate cart
-        if session.cart.is_empty():
+        # Validate cart using backend cart service
+        cart_summary = await self.cart_service.get_cart_summary(session)
+        if cart_summary['is_empty']:
             return {
                 'success': False,
                 'message': ' Cart is empty. Please add items first.'
@@ -172,78 +176,178 @@ class CheckoutService:
         session.checkout_state.transaction_id = self._generate_transaction_id()
         
         try:
-            logger.info(f"[CheckoutService] Starting SELECT with {len(session.cart.items)} items")
-            logger.debug(f"[CheckoutService] Delivery location: {delivery_city}, {delivery_state}, {delivery_pincode}")
-            logger.debug(f"[CheckoutService] Cart items: {[{'name': item.name, 'id': item.id, 'local_id': getattr(item, 'local_id', None)} for item in session.cart.items]}")
-            
-            # Step 1: Enrich cart items with BIAP product data
-            logger.info("[CheckoutService] Step 1: Enriching cart items with BIAP product data...")
-            enriched_items = await self.product_enrichment.enrich_cart_items(
-                session.cart.items, session.session_id
-            )
-            logger.debug(f"[CheckoutService] Enriched {len(enriched_items)} items")
-            
-            # Step 2: BIAP validation - check for multiple BPP/Provider items
-            logger.info("[CheckoutService] Step 2: Validating order items for BIAP compliance...")
-            validation_result = self.validation.validate_order_items(enriched_items, "select")
-            logger.debug(f"[CheckoutService] Validation result: {validation_result}")
-            if not validation_result.get('success'):
-                logger.error(f"[CheckoutService] Validation failed: {validation_result.get('error', {})}")
+            # Get cart items from backend
+            success, cart_display, cart_items = await self.cart_service.view_cart(session)
+            if not success:
                 return {
                     'success': False,
-                    'message': f" {validation_result['error']['message']}"
+                    'message': f' Failed to get cart items: {cart_display}'
                 }
             
+            # DEBUG: Check what cart data is actually received in checkout service
+            logger.error(f"[CHECKOUT DEBUG] Cart items received from cart_service: {len(cart_items)} items")
+            for debug_idx, debug_item in enumerate(cart_items):
+                logger.error(f"[CHECKOUT DEBUG] Item[{debug_idx}] keys: {list(debug_item.keys()) if isinstance(debug_item, dict) else 'Not a dict'}")
+                if isinstance(debug_item, dict) and 'item' in debug_item:
+                    nested_item = debug_item.get('item', {})
+                    logger.error(f"[CHECKOUT DEBUG] Item[{debug_idx}] nested item keys: {list(nested_item.keys()) if isinstance(nested_item, dict) else 'Nested not a dict'}")
+                    logger.error(f"[CHECKOUT DEBUG] Item[{debug_idx}] nested local_id: {nested_item.get('local_id')}")
+                else:
+                    logger.error(f"[CHECKOUT DEBUG] Item[{debug_idx}] missing 'item' key or not a dict")
+            
+            logger.info(f"[CheckoutService] Starting SELECT with {len(cart_items)} items")
+            logger.debug(f"[CheckoutService] Delivery location: {delivery_city}, {delivery_state}, {delivery_pincode}")
+            logger.debug(f"[CheckoutService] Cart items: {[{'name': item.get('name'), 'id': item.get('id')} for item in cart_items]}")
+            
+            # Step 1: Debug cart service response structure
+            logger.error("[EXECUTION CHECKPOINT] Starting Step 1: Debugging cart service response structure...")
+            logger.info("[CheckoutService] Step 1: Debugging cart service response structure...")
+            logger.info(f"[CheckoutService] Raw cart items count: {len(cart_items)}")
+            
+            try:
+                # CRITICAL DEBUG: Log exact structure of cart items
+                for idx, item in enumerate(cart_items):
+                    logger.info(f"[CART DEBUG] Item[{idx}] structure:")
+                    logger.info(f"  Keys: {list(item.keys()) if isinstance(item, dict) else 'Not a dict'}")
+                    logger.info(f"  item_id: {item.get('item_id')}")
+                    logger.info(f"  id: {item.get('id')}")
+                    logger.info(f"  count: {item.get('count')}")
+                    logger.info(f"  Full item: {json.dumps(item, indent=2) if isinstance(item, dict) else str(item)}")
+                logger.error("[EXECUTION CHECKPOINT] Step 1 completed successfully")
+            except Exception as e:
+                logger.error(f"[EXECUTION CHECKPOINT] Step 1 FAILED with exception: {e}")
+                raise e
+            
+            # Step 2: BIAP validation - check for multiple BPP/Provider items using raw data
+            logger.error("[EXECUTION CHECKPOINT] Starting Step 2: BIAP validation...")
+            logger.info("[CheckoutService] Step 2: Validating order items for BIAP compliance...")
+            
+            try:
+                validation_result = self.validation.validate_order_items(cart_items, "select")
+                logger.debug(f"[CheckoutService] Validation result: {validation_result}")
+                if not validation_result.get('success'):
+                    logger.error(f"[CheckoutService] Validation failed: {validation_result.get('error', {})}")
+                    return {
+                        'success': False,
+                        'message': f" {validation_result['error']['message']}"
+                    }
+                logger.error("[EXECUTION CHECKPOINT] Step 2 completed successfully")
+            except Exception as e:
+                logger.error(f"[EXECUTION CHECKPOINT] Step 2 FAILED with exception: {e}")
+                raise e
+            
             # Step 3: Get proper city code from pincode
+            logger.error("[EXECUTION CHECKPOINT] Starting Step 3: Getting city code...")
             logger.info(f"[CheckoutService] Step 3: Getting city code for pincode {delivery_pincode}...")
-            city_code = get_city_code_by_pincode(delivery_pincode)
-            logger.debug(f"[CheckoutService] City code: {city_code}")
+            
+            try:
+                city_code = get_city_code_by_pincode(delivery_pincode)
+                logger.debug(f"[CheckoutService] City code: {city_code}")
+                logger.error("[EXECUTION CHECKPOINT] Step 3 completed successfully")
+            except Exception as e:
+                logger.error(f"[EXECUTION CHECKPOINT] Step 3 FAILED with exception: {e}")
+                raise e
             
             # Step 4: Create SELECT context (automatically simplified for SELECT operations)
+            logger.error("[EXECUTION CHECKPOINT] Starting Step 4: Creating SELECT context...")
             logger.info("[CheckoutService] Step 4: Creating SELECT context...")
-            context = self.context_factory.create({
-                'action': 'select',
-                'transaction_id': session.checkout_state.transaction_id,
-                'city': delivery_pincode,  #  Use pincode directly as per backend format
-                'pincode': delivery_pincode
-            })
-            logger.debug(f"[CheckoutService] SELECT context created: {json.dumps(context, indent=2)}")
+            
+            try:
+                context = self.context_factory.create({
+                    'action': 'select',
+                    'transaction_id': session.checkout_state.transaction_id,
+                    'city': delivery_pincode,  #  Use pincode directly as per backend format
+                    'pincode': delivery_pincode
+                })
+                logger.debug(f"[CheckoutService] SELECT context created: {json.dumps(context, indent=2)}")
+                logger.error("[EXECUTION CHECKPOINT] Step 4 completed successfully")
+            except Exception as e:
+                logger.error(f"[EXECUTION CHECKPOINT] Step 4 FAILED with exception: {e}")
+                raise e
             
             # Step 5: Get BPP info from validated items (for logging only)
+            logger.error("[EXECUTION CHECKPOINT] Starting Step 5: Getting BPP info...")
             logger.info("[CheckoutService] Step 5: Getting BPP info from validated items...")
-            bpp_info = self.validation.get_order_bpp_info(enriched_items)
-            logger.debug(f"[CheckoutService] BPP info: {bpp_info}")
-            if bpp_info:
-                # Don't add to context - keep context clean like working frontend
-                logger.info(f"[CheckoutService] Using BPP: {bpp_info['bpp_id']} at {bpp_info['bpp_uri']}")
             
-            # Step 6: Transform enriched items to BIAP SELECT format
-            logger.info("[CheckoutService] Step 6: Transforming items to BIAP SELECT format...")
+            try:
+                bpp_info = self.validation.get_order_bpp_info(cart_items)
+                logger.debug(f"[CheckoutService] BPP info: {bpp_info}")
+                if bpp_info:
+                    # Don't add to context - keep context clean like working frontend
+                    logger.info(f"[CheckoutService] Using BPP: {bpp_info['bpp_id']} at {bpp_info['bpp_uri']}")
+                logger.error("[EXECUTION CHECKPOINT] Step 5 completed successfully")
+            except Exception as e:
+                logger.error(f"[EXECUTION CHECKPOINT] Step 5 FAILED with exception: {e}")
+                raise e
+            
+            # Step 6: Transform raw cart items to BIAP SELECT format (preserve backend structure)
+            logger.error("[EXECUTION CHECKPOINT] Starting Step 6: Field mapping transformation...")
+            logger.info("[CheckoutService] Step 6: Transforming raw cart items to BIAP SELECT format...")
             select_items = []
             location_set = set()
             provider_info = None
             
-            for item in enriched_items:
-                # Create SELECT item structure matching working frontend format exactly
+            # EXECUTION CHECKPOINT: Field mapping loop starting
+            logger.error(f"[EXECUTION CHECKPOINT] About to start field mapping loop with {len(cart_items)} items")
+            
+            for idx, item in enumerate(cart_items):
+                logger.info(f"[CheckoutService] Processing cart item {idx + 1}/{len(cart_items)}")
+                
+                try:
+                    # Use REAL data directly from backend cart response (DRY principle)
+                    logger.info(f"[Cart Item Structure] Item {idx + 1}: {json.dumps(item, indent=2)}")
+                    
+                    # Extract real values from nested item structure (where the real data lives)
+                    nested_item = item.get('item', {})         # Real item data is nested
+                    local_id_value = nested_item.get('local_id')      # Real local_id from backend (nested)
+                    full_id_value = nested_item.get('id')            # Real full ID from backend (nested)
+                    provider_data = nested_item.get('provider')      # Real provider data from backend (nested)
+                    
+                    logger.info(f"[Real Data] Item {idx + 1}: local_id={local_id_value}, id={full_id_value}")
+                    logger.info(f"[Real Data] Provider present: {bool(provider_data)}")
+                    
+                except Exception as e:
+                    logger.error(f"[Cart Processing Error] Exception processing item {idx + 1}: {e}")
+                    logger.error(f"[Cart Processing Error] Item data: {json.dumps(item, indent=2) if isinstance(item, dict) else str(item)}")
+                    raise e
+                
                 select_item = {
-                    'id': item.id,                   # Full ONDC ID
-                    'local_id': item.local_id,       # UUID local ID
-                    'customisationState': {},        # Required by frontend format
-                    'quantity': {'count': item.quantity},  # Wrapped in count object
-                    'customisations': None,          # Required by frontend format
-                    'hasCustomisations': False       # Required by frontend format
+                    'id': full_id_value,                    # Real full ONDC ID from backend
+                    'local_id': local_id_value,             # Real UUID local ID from backend
+                    'customisationState': {},               # Required by ONDC format
+                    'quantity': {'count': item.get('count', 1)},  # Wrapped in count object
+                    'customisations': None,                 # Required by ONDC format
+                    'hasCustomisations': False              # Required by ONDC format
                 }
                 
-                # Add provider at item level - use real provider data directly
-                if item.provider:
-                    select_item['provider'] = item.provider  # Use real provider data as-is
+                # CRITICAL VALIDATION: Ensure we have real data from backend
+                if not local_id_value:
+                    logger.error(f"[Backend Data Error] Backend cart missing local_id for item: {json.dumps(item, indent=2)}")
+                    return {
+                        'success': False,
+                        'message': f"❌ Backend cart error: Item missing local_id. Backend API issue."
+                    }
+                
+                if not full_id_value:
+                    logger.error(f"[Backend Data Error] Backend cart missing id for item: {json.dumps(item, indent=2)}")
+                    return {
+                        'success': False,
+                        'message': f"❌ Backend cart error: Item missing id. Backend API issue."
+                    }
+                
+                # Add real provider data from backend
+                if provider_data:
+                    select_item['provider'] = provider_data  # Use real provider data from backend
+                    logger.info(f"[Real Provider] Item {idx + 1} has provider: {provider_data.get('descriptor', {}).get('name', 'Unknown')}")
                     # Track location for debugging
-                    if item.location_id:
-                        location_set.add(item.location_id)
+                    if item.get('location_id'):
+                        location_set.add(item['location_id'])
+                else:
+                    logger.warning(f"[Backend Data Warning] Item {idx + 1} missing provider data from backend")
                 
                 # Capture provider info from first item
-                if not provider_info and item.provider:
-                    provider_info = item.provider
+                if not provider_info and provider_data:
+                    provider_info = provider_data
                 
                 select_items.append(select_item)
             
@@ -292,11 +396,18 @@ class CheckoutService:
             logger.info(f"  - Delivery pincode: {delivery_pincode}")
             logger.info(f"  - Using simplified frontend format (no cart provider)")
             
-            # Validate item-level providers (frontend format validation)
-            for idx, item in enumerate(select_items):
-                if 'provider' in item:
-                    provider = item['provider']
-                    logger.info(f"[CheckoutService] Item[{idx}] provider validation:")
+            # Enhanced validation logging for corrected field mapping
+            logger.info("[CheckoutService] FIELD MAPPING VALIDATION:")
+            for idx, (original_item, select_item) in enumerate(zip(cart_items, select_items)):
+                nested_item = original_item.get('item', {})
+                logger.info(f"[CheckoutService] Item[{idx}] field mapping:")
+                logger.info(f"  Top-level item_id: {original_item.get('item_id')} → SELECT local_id: {select_item.get('local_id')}")
+                logger.info(f"  Nested item.id: {nested_item.get('id')} → SELECT id: {select_item.get('id')}")
+                logger.info(f"  Top-level count: {original_item.get('count')} → SELECT quantity.count: {select_item.get('quantity', {}).get('count')}")
+                logger.info(f"  ✅ CRITICAL CHECK: local_id is not null: {select_item.get('local_id') is not None}")
+                
+                if 'provider' in select_item:
+                    provider = select_item['provider']
                     logger.info(f"  Provider ID: {provider.get('id')}")
                     logger.info(f"  Provider local_id: {provider.get('local_id')}")
                     
@@ -359,53 +470,27 @@ class CheckoutService:
                 elif isinstance(select_response, dict):
                     logger.error(f"  Dict keys: {list(select_response.keys())}")
             
-            if not message_id:
-                logger.error(f"[CheckoutService] No messageId in SELECT response: {select_response}")
-                return {
-                    'success': False,
-                    'message': ' Failed to initiate SELECT request. No message ID received.'
-                }
+            # SELECT API returned 200 success - treat as successful immediately (no polling)
+            logger.info(f"[CheckoutService] SELECT request successful (200 response)")
+            logger.info(f"[CheckoutService] MessageId found: {message_id if message_id else 'None'}")
             
-            logger.info(f"[CheckoutService] Polling for SELECT response with messageId: {message_id}")
+            # Update session to SELECT stage
+            session.checkout_state.stage = CheckoutStage.SELECT
+            session.add_to_history('select_items_for_order', {
+                'city': delivery_city,
+                'state': delivery_state, 
+                'pincode': delivery_pincode,
+                'items_count': len(cart_items)
+            })
             
-            # Poll for the actual SELECT response
-            result = await self._poll_for_response(
-                poll_function=self.buyer_app.get_select_response,
-                message_id=message_id,
-                operation_name="SELECT",
-                max_attempts=15,
-                initial_delay=2.0,
-                auth_token=auth_token
-            )
-            
-            logger.debug(f"[CheckoutService] Final SELECT response after polling: {json.dumps(result, indent=2) if result else 'None'}")
-            
-            if result and result.get('success', True) and 'error' not in result:
-                # Update session to SELECT stage
-                session.checkout_state.stage = CheckoutStage.SELECT
-                session.add_to_history('select_items_for_order', {
-                    'city': delivery_city,
-                    'state': delivery_state, 
-                    'pincode': delivery_pincode,
-                    'items_count': len(session.cart.items)
-                })
-                
-                logger.info("[CheckoutService]  SELECT successful - delivery quotes received")
-                return {
-                    'success': True,
-                    'message': f' Delivery available in {delivery_city}! Quotes ready.',
-                    'stage': 'select_completed',
-                    'quote_data': result,
-                    'next_step': 'provide_complete_delivery_details'
-                }
-            else:
-                error_msg = result.get('message', 'Failed to get delivery quotes') if result else 'SELECT API failed'
-                logger.error(f"[CheckoutService] SELECT failed: {error_msg}")
-                logger.error(f"[CheckoutService] Full error response: {result}")
-                return {
-                    'success': False,
-                    'message': f' {error_msg}'
-                }
+            logger.info("[CheckoutService] ✅ SELECT successful - delivery quotes received")
+            return {
+                'success': True,
+                'message': f'✅ Delivery available in {delivery_city}! SELECT completed successfully.',
+                'stage': 'select_completed',
+                'quote_data': select_response,
+                'next_step': 'initialize_order_with_customer_details'
+            }
                 
         except Exception as e:
             logger.error(f"[CheckoutService] SELECT operation failed with exception: {e}", exc_info=True)
@@ -491,8 +576,16 @@ class CheckoutService:
             logger.info(f"[CheckoutService] Starting INIT for customer: {customer_name}")
             
             # Step 1: Get enriched items for validation
+            # Get cart items from backend for INIT/CONFIRM
+            success, cart_display, cart_items = await self.cart_service.view_cart(session)
+            if not success:
+                return {
+                    'success': False,
+                    'message': f' Failed to get cart items: {cart_display}'
+                }
+            
             enriched_items = await self.product_enrichment.enrich_cart_items(
-                session.cart.items, session.session_id
+                cart_items, session.session_id
             )
             
             # Step 2: BIAP validation - check for multiple BPP/Provider items  
@@ -673,8 +766,8 @@ class CheckoutService:
                     'message': f' Order initialized successfully!',
                     'stage': 'init_completed',
                     'order_summary': {
-                        'items': session.cart.total_items,
-                        'total': session.cart.total_value,
+                        'items': len(cart_items),
+                        'total': cart_summary.get('total_value', 0.0),
                         'delivery': delivery_address,
                         'payment': payment_method.upper()
                     },
@@ -717,7 +810,9 @@ class CheckoutService:
             }
         
         try:
-            total_amount = session.cart.total_value
+            # Get cart summary for payment amount
+            cart_summary = await self.cart_service.get_cart_summary(session)
+            total_amount = cart_summary['total_value']
             
             # MOCK PAYMENT CREATION - Using values from Himira Order Postman Collection
             if config.payment.mock_mode:
@@ -812,8 +907,16 @@ class CheckoutService:
             logger.info(f"[CheckoutService] Starting CONFIRM with payment status: {payment_status}")
             
             # Step 1: Get enriched items for validation
+            # Get cart items from backend for INIT/CONFIRM
+            success, cart_display, cart_items = await self.cart_service.view_cart(session)
+            if not success:
+                return {
+                    'success': False,
+                    'message': f' Failed to get cart items: {cart_display}'
+                }
+            
             enriched_items = await self.product_enrichment.enrich_cart_items(
-                session.cart.items, session.session_id
+                cart_items, session.session_id
             )
             
             # Step 2: BIAP validation - check for multiple BPP/Provider items
@@ -877,7 +980,7 @@ class CheckoutService:
                 confirm_items.append(confirm_item)
             
             # Step 7: Create payment object with MOCK values - TESTING ONLY
-            total_amount = session.cart.total_value
+            total_amount = cart_summary['total_value']
             
             # MOCK PAYMENT IMPLEMENTATION - Using values from Himira Order Postman Collection
             if config.payment.mock_mode:
@@ -1020,17 +1123,19 @@ class CheckoutService:
                 session.checkout_state.stage = CheckoutStage.CONFIRMED
                 session.add_to_history('confirm_order', {
                     'order_id': order_id,
-                    'total': session.cart.total_value
+                    'total': cart_summary['total_value']
                 })
                 
-                # Save cart details before clearing
-                cart_items = list(session.cart.items)
-                total_value = session.cart.total_value
+                # Get final cart details before clearing
+                cart_summary = await self.cart_service.get_cart_summary(session)
+                success, cart_display, cart_items = await self.cart_service.view_cart(session)
+                
+                total_value = cart_summary['total_value']
                 delivery_address = session.checkout_state.delivery_info.address
                 phone = session.checkout_state.delivery_info.phone
                 
                 # Clear cart after successful order
-                session.cart.clear()
+                success, message = await self.cart_service.clear_cart(session)
                 
                 return {
                     'success': True,
@@ -1151,5 +1256,6 @@ def get_checkout_service() -> CheckoutService:
     """Get singleton CheckoutService instance"""
     global _checkout_service
     if _checkout_service is None:
-        _checkout_service = CheckoutService()
+        from .cart_service import get_cart_service
+        _checkout_service = CheckoutService(cart_service=get_cart_service())
     return _checkout_service
