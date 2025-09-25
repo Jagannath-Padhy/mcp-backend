@@ -85,7 +85,7 @@ class CartService:
                 
                 # WORKAROUND: Since backend GET cart API returns empty despite successful POST,
                 # we'll maintain a local cart cache for immediate consistency
-                self._cache_cart_item(session, product, quantity, result)
+                # self._cache_cart_item(session, product, quantity, result)  # TODO: Implement if needed
                 
                 return True, f" Added {quantity}x {product_name} to cart"
             else:

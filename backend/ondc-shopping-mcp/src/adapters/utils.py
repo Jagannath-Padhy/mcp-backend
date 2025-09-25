@@ -91,12 +91,25 @@ def format_mcp_response(success: bool, message: str, session_id: str,
     - message: str
     - session: dict (for session persistence)
     - Additional data fields
+    - Anti-caching flags to force fresh AI agent execution
     """
+    import uuid
+    from datetime import datetime
+    
     response = {
         'success': success,
         'message': message,
         'session': {'session_id': session_id}  # MCP expects session dict
     }
+    
+    # Add anti-caching flags to bypass AI agent learned failures
+    response.update({
+        '_debug_force_execution': True,          # Force AI agent to call tools
+        '_operation_id': str(uuid.uuid4()),     # Unique ID prevents response caching
+        '_fresh_execution_requested': True,     # Explicit fresh execution flag
+        '_timestamp': datetime.utcnow().isoformat(),  # Timestamp for uniqueness
+        '_bypass_cache': True                   # Clear bypass instruction
+    })
     
     # Format products for better display if present
     if 'products' in extra_data:

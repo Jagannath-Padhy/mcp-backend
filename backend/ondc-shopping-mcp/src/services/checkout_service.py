@@ -20,6 +20,8 @@ from ..buyer_backend_client import BuyerBackendClient, get_buyer_backend_client
 from ..data_models.biap_context_factory import get_biap_context_factory
 from ..services.payment_mock_service import mock_payment_service
 from ..services.cart_service import CartService
+from ..services.biap_validation_service import BiapValidationService
+from ..services.product_enrichment_service import get_product_enrichment_service
 from ..utils.city_code_mapping import get_city_code_by_pincode
 from ..utils.logger import get_logger
 from ..config import config
@@ -43,6 +45,8 @@ class CheckoutService:
         self.buyer_app = buyer_backend_client or get_buyer_backend_client()
         self.context_factory = get_biap_context_factory()
         self.cart_service = cart_service
+        self.validation = BiapValidationService()  # Initialize validation service
+        self.product_enrichment = get_product_enrichment_service()  # Initialize product enrichment service
         logger.info("CheckoutService initialized with backend services")
     
     async def _poll_for_response(
@@ -460,32 +464,47 @@ class CheckoutService:
         Returns:
             Quote and fulfillment options from ONDC SELECT
         """
+        # DEBUG: Add logging to track SELECT execution
+        logger.info(f"[DEBUG SELECT] Step 1: Starting SELECT operation for session {session.session_id}")
+        
         # Validate cart using backend cart service
+        logger.info(f"[DEBUG SELECT] Step 2: Checking cart summary...")
         cart_summary = await self.cart_service.get_cart_summary(session)
+        logger.info(f"[DEBUG SELECT] Step 2 Result: cart_summary = {cart_summary}")
         if cart_summary['is_empty']:
+            logger.info(f"[DEBUG SELECT] Step 2 Failed: Cart is empty")
             return {
                 'success': False,
                 'message': ' Cart is empty. Please add items first.'
             }
+        logger.info(f"[DEBUG SELECT] Step 2 Passed: Cart has {cart_summary.get('total_items', 0)} items")
         
         # Validate delivery location
+        logger.info(f"[DEBUG SELECT] Step 3: Validating delivery location...")
+        logger.info(f"[DEBUG SELECT] Step 3 Params: city={delivery_city}, state={delivery_state}, pincode={delivery_pincode}")
         if not all([delivery_city, delivery_state, delivery_pincode]):
+            logger.info(f"[DEBUG SELECT] Step 3 Failed: Missing delivery location")
             return {
                 'success': False,
                 'message': ' Missing delivery location. Please provide city, state, and pincode.'
             }
+        logger.info(f"[DEBUG SELECT] Step 3 Passed: All delivery location params provided")
         
         # Generate transaction ID for this checkout session
         session.checkout_state.transaction_id = self._generate_transaction_id()
         
         try:
             # Get cart items from backend
+            logger.info(f"[DEBUG SELECT] Step 4: Getting cart items from backend...")
             success, cart_display, cart_items = await self.cart_service.view_cart(session)
+            logger.info(f"[DEBUG SELECT] Step 4 Result: success={success}, items_count={len(cart_items) if cart_items else 0}")
             if not success:
+                logger.info(f"[DEBUG SELECT] Step 4 Failed: {cart_display}")
                 return {
                     'success': False,
                     'message': f' Failed to get cart items: {cart_display}'
                 }
+            logger.info(f"[DEBUG SELECT] Step 4 Passed: Retrieved {len(cart_items)} cart items")
             
             # DEBUG: Check what cart data is actually received in checkout service
             logger.error(f"[CHECKOUT DEBUG] Cart items received from cart_service: {len(cart_items)} items")
@@ -896,10 +915,12 @@ Ready to proceed with order initialization!"""
                 }
                 
         except Exception as e:
+            logger.error(f"[DEBUG SELECT] EXCEPTION CAUGHT: {type(e).__name__}: {str(e)}", exc_info=True)
+            logger.error(f"[DEBUG SELECT] Exception details: {repr(e)}")
             logger.error(f"[CheckoutService] SELECT operation failed with exception: {e}", exc_info=True)
             return {
                 'success': False,
-                'message': ' Failed to get delivery options. Please try again.'
+                'message': f' Failed to get delivery options. Exception: {str(e)}'
             }
     
     async def initialize_order(
@@ -1019,6 +1040,9 @@ Ready to proceed with order initialization!"""
             enriched_items = await self.product_enrichment.enrich_cart_items(
                 cart_items, session.session_id
             )
+            
+            # Get cart summary for order total calculations
+            cart_summary = await self.cart_service.get_cart_summary(session)
             
             # Step 2: BIAP validation - check for multiple BPP/Provider items  
             validation_result = self.validation.validate_order_items(enriched_items, "init")
@@ -1258,36 +1282,64 @@ Ready to proceed with order initialization!"""
             logger.info(f"[INIT] 🌐 Calling /v2/initialize_order endpoint...")
             init_response = await self.buyer_app.initialize_order(init_data, auth_token=auth_token)
             
-            # Enhanced INIT response logging
+            # Cache INIT response immediately for debugging/recovery
+            if init_response:
+                message_id_for_cache = session.checkout_state._extract_message_id(init_response)
+                session.checkout_state.cache_operation_response('init', init_response, message_id_for_cache)
+                logger.info(f"[INIT] 💾 Cached INIT response with message_id: {message_id_for_cache}")
+            
+            # 🔥 ENHANCED INIT RESPONSE LOGGING - LOG IMMEDIATELY BEFORE POLLING
             if init_response:
                 logger.info(f"[INIT] ✅ INIT API response received successfully")
-                logger.debug(f"[INIT] 📥 Complete INIT response:")
-                logger.debug(f"{json.dumps(init_response, indent=2)}")
+                logger.info(f"[INIT] 📥 Raw INIT response received BEFORE polling:")
+                logger.info(f"[INIT] Response URL template: https://hp-buyer-backend-preprod.himira.co.in/clientApis/v2/on_initialize_order?messageIds={{message_id}}")
+                logger.info(f"[INIT] 📋 Full INIT response structure:")
+                logger.info(f"{json.dumps(init_response, indent=2)}")
                 
-                # Log response structure analysis
+                # Log response structure analysis with more detail
                 if isinstance(init_response, list) and len(init_response) > 0:
-                    logger.info(f"[INIT] Response is array with {len(init_response)} item(s)")
+                    logger.info(f"[INIT] 📊 Response is array with {len(init_response)} item(s)")
                     first_item = init_response[0]
+                    
+                    # Check for different message_id locations
                     if 'messageId' in first_item:
-                        logger.info(f"[INIT] Found messageId: {first_item['messageId']}")
+                        logger.info(f"[INIT] 🔍 Found messageId at root: {first_item['messageId']}")
+                    if 'message_id' in first_item:
+                        logger.info(f"[INIT] 🔍 Found message_id at root: {first_item['message_id']}")
                     if 'context' in first_item:
-                        logger.info(f"[INIT] Found context with transaction_id: {first_item['context'].get('transaction_id')}")
+                        context = first_item['context']
+                        logger.info(f"[INIT] 📍 Found context with transaction_id: {context.get('transaction_id')}")
+                        if 'message_id' in context:
+                            logger.info(f"[INIT] ✅ Found message_id in context: {context['message_id']}")
+                            logger.info(f"[INIT] 🔗 Full polling URL: https://hp-buyer-backend-preprod.himira.co.in/clientApis/v2/on_initialize_order?messageIds={context['message_id']}")
+                        if 'messageId' in context:
+                            logger.info(f"[INIT] ✅ Found messageId in context: {context['messageId']}")
+                            logger.info(f"[INIT] 🔗 Full polling URL: https://hp-buyer-backend-preprod.himira.co.in/clientApis/v2/on_initialize_order?messageIds={context['messageId']}")
+                    
+                    # Log all keys for debugging
+                    logger.debug(f"[INIT] 🔧 First item keys: {list(first_item.keys())}")
+                    if 'context' in first_item:
+                        logger.debug(f"[INIT] 🔧 Context keys: {list(first_item['context'].keys())}")
+                        
                 elif isinstance(init_response, dict):
-                    logger.info(f"[INIT] Response is dict with keys: {list(init_response.keys())}")
+                    logger.info(f"[INIT] 📊 Response is dict with keys: {list(init_response.keys())}")
                     if 'messageId' in init_response:
-                        logger.info(f"[INIT] Found messageId: {init_response['messageId']}")
+                        logger.info(f"[INIT] 🔍 Found messageId: {init_response['messageId']}")
+                    if 'message_id' in init_response:
+                        logger.info(f"[INIT] 🔍 Found message_id: {init_response['message_id']}")
             else:
                 logger.error(f"[INIT] ❌ INIT API returned None/empty response")
             
             logger.info(f"[CheckoutService] INIT API initial response received")
             
-            # Extract message ID from response for polling
+            # Extract message ID from ONDC INIT response 
+            # ONDC format: response[0]['context']['message_id']
             message_id = None
-            if init_response:
-                if isinstance(init_response, dict):
-                    message_id = init_response.get('messageId') or init_response.get('message_id')
-                elif isinstance(init_response, list) and len(init_response) > 0:
-                    message_id = init_response[0].get('messageId') or init_response[0].get('message_id')
+            if isinstance(init_response, list) and len(init_response) > 0:
+                first_item = init_response[0]
+                if 'context' in first_item and 'message_id' in first_item['context']:
+                    message_id = first_item['context']['message_id']
+                    logger.info(f"[INIT] Extracted message_id from context: {message_id}")
             
             if not message_id:
                 logger.error(f"[CheckoutService] No messageId in INIT response: {init_response}")
@@ -1477,6 +1529,9 @@ Ready to proceed with order initialization!"""
             enriched_items = await self.product_enrichment.enrich_cart_items(
                 cart_items, session.session_id
             )
+            
+            # Get cart summary for order total calculations
+            cart_summary = await self.cart_service.get_cart_summary(session)
             
             # Step 2: BIAP validation - check for multiple BPP/Provider items
             validation_result = self.validation.validate_order_items(enriched_items, "confirm")
@@ -1686,7 +1741,6 @@ Ready to proceed with order initialization!"""
                 })
                 
                 # Get final cart details before clearing
-                cart_summary = await self.cart_service.get_cart_summary(session)
                 success, cart_display, cart_items = await self.cart_service.view_cart(session)
                 
                 total_value = cart_summary['total_value']

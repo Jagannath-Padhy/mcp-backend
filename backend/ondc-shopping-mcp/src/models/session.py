@@ -66,6 +66,11 @@ class CheckoutState:
     payment_id: Optional[str] = None  # Mock Razorpay payment ID (e.g., pay_RFWPuAV50T2Qnj)
     order_id: Optional[str] = None
     
+    # Enhanced debugging and recovery system
+    operation_responses: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # Cache ONDC operation responses
+    last_error: Optional[Dict[str, Any]] = None  # Store detailed error info for debugging
+    force_fresh_execution: bool = False  # Flag to bypass AI agent caching
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
         return {
@@ -75,7 +80,10 @@ class CheckoutState:
             'payment_method': self.payment_method,
             'payment_status': self.payment_status,
             'payment_id': self.payment_id,
-            'order_id': self.order_id
+            'order_id': self.order_id,
+            'operation_responses': self.operation_responses,
+            'last_error': self.last_error,
+            'force_fresh_execution': self.force_fresh_execution
         }
     
     @classmethod
@@ -88,8 +96,46 @@ class CheckoutState:
             payment_method=data.get('payment_method'),
             payment_status=data.get('payment_status', 'none'),
             payment_id=data.get('payment_id'),
-            order_id=data.get('order_id')
+            order_id=data.get('order_id'),
+            operation_responses=data.get('operation_responses', {}),
+            last_error=data.get('last_error'),
+            force_fresh_execution=data.get('force_fresh_execution', False)
         )
+    
+    def cache_operation_response(self, operation: str, response: Dict[str, Any], message_id: Optional[str] = None) -> None:
+        """Cache operation response for debugging and recovery"""
+        from datetime import datetime
+        
+        self.operation_responses[operation] = {
+            'response': response,
+            'timestamp': datetime.utcnow().isoformat(),
+            'message_id': message_id,
+            'stage': operation
+        }
+    
+    def get_cached_response(self, operation: str) -> Optional[Dict[str, Any]]:
+        """Get cached operation response if available"""
+        return self.operation_responses.get(operation)
+    
+    def set_last_error(self, error_info: Dict[str, Any]) -> None:
+        """Store detailed error information for debugging"""
+        from datetime import datetime
+        
+        self.last_error = {
+            **error_info,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+    
+    def _extract_message_id(self, response: Dict[str, Any]) -> Optional[str]:
+        """Extract message_id from ONDC response for caching"""
+        if isinstance(response, list) and len(response) > 0:
+            first_item = response[0]
+            if 'context' in first_item and 'message_id' in first_item['context']:
+                return first_item['context']['message_id']
+        elif isinstance(response, dict):
+            if 'context' in response and 'message_id' in response['context']:
+                return response['context']['message_id']
+        return None
 
 
 @dataclass
