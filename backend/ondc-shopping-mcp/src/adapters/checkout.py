@@ -229,13 +229,14 @@ Or provide delivery location directly:
 
 async def initialize_order(
     customer_name: str,
-    delivery_address: str,
+    delivery_address: str,  # This will receive the combined address from MCP tool
     phone: str,
     email: str,
     payment_method: str = 'razorpay',
     city: Optional[str] = None,
     state: Optional[str] = None,
     pincode: Optional[str] = None,
+    delivery_gps: Optional[str] = None,
     session_id: Optional[str] = None,
     **kwargs
 ) -> Dict[str, Any]:
@@ -304,7 +305,7 @@ To initialize your order, I need your complete information:
         # Call enhanced BIAP-compatible checkout service
         result = await checkout_service.initialize_order(
             session_obj, customer_name, delivery_address, phone, email, 
-            payment_method, city, state, pincode
+            payment_method, city, state, pincode, delivery_gps
         )
         
         # Save enhanced session with conversation tracking

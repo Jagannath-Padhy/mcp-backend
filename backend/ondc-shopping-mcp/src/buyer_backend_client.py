@@ -169,8 +169,14 @@ class BuyerBackendClient:
                 
                 if response.status_code == 200:
                     try:
-                        return response.json()
+                        response_json = response.json()
+                        logger.info(f"[BackendClient] 🔍 Raw JSON response: {response_json}")
+                        logger.info(f"[BackendClient] 🔍 Response type: {type(response_json)}")
+                        if isinstance(response_json, list):
+                            logger.info(f"[BackendClient] 🔍 Array length: {len(response_json)}")
+                        return response_json
                     except json.JSONDecodeError:
+                        logger.info(f"[BackendClient] 🔍 JSON decode failed, returning text: {response.text}")
                         return {"success": True, "data": response.text}
                 elif response.status_code == 401:
                     logger.error(f"Unauthorized access to {endpoint}")
@@ -308,11 +314,26 @@ class BuyerBackendClient:
     
     async def add_to_cart(self, user_id: str, device_id: str, cart_data: Dict) -> Optional[Dict]:
         """Add item to cart"""
-        return await self._make_request("POST", f"/v2/cart/{user_id}/{device_id}", json_data=cart_data)
+        logger.info(f"[BackendClient] 🛒 ADD TO CART API CALL")
+        logger.info(f"[BackendClient] 🎯 Endpoint: POST /v2/cart/{user_id}/{device_id}")
+        logger.info(f"[BackendClient] 📦 Payload: {json.dumps(cart_data, indent=2)}")
+        
+        result = await self._make_request("POST", f"/v2/cart/{user_id}/{device_id}", json_data=cart_data)
+        
+        logger.info(f"[BackendClient] 📥 ADD TO CART Response:")
+        logger.info(f"[BackendClient] {json.dumps(result, indent=2) if result else 'None'}")
+        return result
     
     async def get_cart(self, user_id: str, device_id: str) -> Optional[Dict]:
         """Get cart contents"""
-        return await self._make_request("GET", f"/v2/cart/{user_id}/{device_id}")
+        logger.info(f"[BackendClient] 👁️ GET CART API CALL")
+        logger.info(f"[BackendClient] 🎯 Endpoint: GET /v2/cart/{user_id}/{device_id}")
+        
+        result = await self._make_request("GET", f"/v2/cart/{user_id}/{device_id}")
+        
+        logger.info(f"[BackendClient] 📥 GET CART Response:")
+        logger.info(f"[BackendClient] {json.dumps(result, indent=2) if result else 'None'}")
+        return result
     
     async def update_cart_item(self, user_id: str, item_id: str, update_data: Dict) -> Optional[Dict]:
         """Update cart item"""
@@ -381,7 +402,8 @@ class BuyerBackendClient:
         return result
     
     async def get_select_response(self, **params) -> Optional[Dict]:
-        """Get select response data"""
+        """Get select response data - wil-api-key should be included by default"""
+        # The _make_request method already includes wil-api-key header by default
         return await self._make_request("GET", "/v2/on_select", params=params)
     
     async def get_select_data_by_message_id(self, message_id: str) -> Optional[Dict]:
@@ -389,9 +411,14 @@ class BuyerBackendClient:
         return await self._make_request("GET", f"/v2/select/Data/{message_id}")
     
     async def initialize_order(self, init_data: Dict, auth_token: Optional[str] = None) -> Optional[Dict]:
-        """ONDC Init: Initialize order"""
+        """ONDC Init: Initialize order
+        
+        Note: Himira backend expects array format for INIT requests: [{...}]
+        """
+        # Wrap init_data in array format as required by Himira backend
+        array_payload = [init_data]
         return await self._make_request("POST", "/v2/initialize_order", 
-                                      json_data=init_data, auth_token=auth_token, require_auth=False)
+                                      json_data=array_payload, auth_token=auth_token, require_auth=False)
     
     async def get_init_response(self, auth_token: Optional[str] = None, **params) -> Optional[Dict]:
         """Get init response"""

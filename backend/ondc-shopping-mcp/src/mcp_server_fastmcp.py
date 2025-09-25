@@ -14,31 +14,7 @@ Key Features:
 - Vector search integration
 - Comprehensive error handling
 
-=== AGENT INSTRUCTIONS ===
-ONDC Shopping - Mandatory Initialization Flow
-
-**MANDATORY FIRST STEP:**
-initialize_shopping(userId="real_user", deviceId="real_device")
-→ Returns session_id that MUST be used for all subsequent operations
-
-**ALL SUBSEQUENT OPERATIONS:**
-Every tool requires the session_id from initialization:
-- search_products(query="rice", session_id="session_xxx")
-- add_to_cart(item=product, session_id="session_xxx")
-- view_cart(session_id="session_xxx")
-- browse_categories(session_id="session_xxx")
-- Checkout operations all require session_id
-
-**FLOW ENFORCEMENT:**
-- initialize_shopping is MANDATORY first step
-- session_id is REQUIRED for all other tools
-- No guest mode or bypass allowed
-- Credentials stored in session, auto-loaded for each operation
-
-**Error Handling:**
-- Skip initialization → "Session ID Required" error
-- Invalid session_id → "Session Not Found" error
-- Clear messaging guides user to proper flow
+Agent instructions are maintained in: mcp_agent_instructions.md
 """
 
 import asyncio
@@ -546,14 +522,17 @@ async def select_items_for_order(
 async def initialize_order(
     ctx: Context,
     customer_name: str,
-    delivery_address: str,
+    building: str,
+    street: str, 
+    locality: str,
+    city: str,
+    state: str,
+    pincode: str,
+    delivery_gps: str,
     phone: str,
     email: str,
     session_id: str,
-    payment_method: str = "razorpay",
-    city: Optional[str] = None,
-    state: Optional[str] = None,
-    pincode: Optional[str] = None
+    payment_method: str = "razorpay"
 ) -> str:
     """Initialize order with customer and delivery details (ONDC INIT stage).
     
@@ -562,22 +541,29 @@ async def initialize_order(
     
     Args:
         customer_name: Full name of the customer
-        delivery_address: Complete street address (e.g., "123 Main St, Apt 4B")
-        phone: Contact phone number (10 digits)
+        building: Building/apartment number  
+        street: Street name
+        locality: Area/locality name
+        city: City name
+        state: State name
+        pincode: PIN/ZIP code
+        delivery_gps: GPS coordinates in "latitude,longitude" format (e.g. "12.9716,77.5946")
+        phone: Contact phone number
         email: Email address
-        session_id: Session identifier (required - from initialize_shopping)
-        payment_method: Payment type - "razorpay", "upi", "card", "netbanking" (COD not supported)
-        city: Delivery city (optional - uses SELECT stage data if not provided)
-        state: Delivery state (optional - uses SELECT stage data if not provided)
-        pincode: Delivery PIN code (optional - uses SELECT stage data if not provided)
+        session_id: Session ID from initialize_shopping
+        payment_method: Payment method (default: "razorpay") - cod not supported by Himira
         
     Returns:
-        Order initialization confirmation with order draft details
+        Order initialization status with next steps
     """
+    # Combine structured address into full address for backend processing
+    full_delivery_address = f"{building} {street} {locality}"
+    
     return await handle_tool_execution("initialize_order", init_order_adapter, ctx,
-                                     customer_name=customer_name, delivery_address=delivery_address,
+                                     customer_name=customer_name, delivery_address=full_delivery_address,
                                      phone=phone, email=email, payment_method=payment_method,
-                                     city=city, state=state, pincode=pincode, session_id=session_id)
+                                     city=city, state=state, pincode=pincode, 
+                                     delivery_gps=delivery_gps, session_id=session_id)
 
 @mcp.tool()
 async def create_payment(

@@ -29,7 +29,7 @@ class CartService:
     async def add_item(self, session: Session, product: Dict[str, Any], 
                        quantity: int = 1) -> Tuple[bool, str]:
         """
-        Add item directly to backend cart
+        Add item directly to backend cart - simple backend-only approach
         
         Args:
             session: User session
@@ -54,17 +54,39 @@ class CartService:
                 logger.error(f"[Cart] No device_id in session {session.session_id}")
                 return False, " Session not properly initialized"
             
-            # Prepare cart payload
+            product_name = product.get('name', 'Unknown Product')
+            provider_id = product.get('provider', {}).get('id', 'Unknown Provider')
+            
+            logger.info(f"[Cart] 🛒 ADD TO CART OPERATION STARTED")
+            logger.info(f"[Cart] 👤 User ID: {user_id}")
+            logger.info(f"[Cart] 📱 Device ID: {device_id}")
+            logger.info(f"[Cart] 🏷️  Item: {product_name}")
+            logger.info(f"[Cart] 🏪 Provider: {provider_id}")
+            logger.info(f"[Cart] 🔢 Quantity: {quantity}")
+            
+            # Create cart payload matching exact backend format
             cart_payload = self._create_backend_cart_payload(product, quantity)
+            logger.info(f"[Cart] 📦 Generated cart payload for backend:")
+            logger.info(f"[Cart] {json.dumps(cart_payload, indent=2)}")
             
-            logger.info(f"[Cart] Adding to backend cart - User: {user_id}, Device: {device_id}, Item: {product.get('name')}")
+            # Log the exact API call being made
+            logger.info(f"[Cart] 🌐 Making API call: POST /v2/cart/{user_id}/{device_id}")
             
-            # Call backend add to cart API
+            # Call backend add to cart API - backend should accumulate items automatically
             result = await self.buyer_app.add_to_cart(user_id, device_id, cart_payload)
+            
+            # Log the complete backend response
+            logger.info(f"[Cart] 📥 Backend ADD response:")
+            logger.info(f"[Cart] {json.dumps(result, indent=2) if result else 'None'}")
             
             if result and not result.get('error'):
                 product_name = product.get('name', 'Unknown Product')
-                logger.info(f"[Cart] Successfully added {product_name} to backend cart")
+                logger.info(f"[Cart] ✅ Successfully added {product_name} to backend cart")
+                
+                # WORKAROUND: Since backend GET cart API returns empty despite successful POST,
+                # we'll maintain a local cart cache for immediate consistency
+                self._cache_cart_item(session, product, quantity, result)
+                
                 return True, f" Added {quantity}x {product_name} to cart"
             else:
                 error_msg = result.get('message', 'Failed to add to cart') if result else 'Backend error'
@@ -93,10 +115,22 @@ class CartService:
                 logger.error(f"[Cart] No device_id in session {session.session_id}")
                 return False, " Session not properly initialized", []
             
-            logger.info(f"[Cart] Fetching backend cart - User: {user_id}, Device: {device_id}")
+            logger.info(f"[Cart] 👁️  VIEW CART OPERATION STARTED")
+            logger.info(f"[Cart] 👤 User ID: {user_id}")
+            logger.info(f"[Cart] 📱 Device ID: {device_id}")
+            logger.info(f"[Cart] 🌐 Making API call: GET /v2/cart/{user_id}/{device_id}")
             
             # Call backend get cart API
             result = await self.buyer_app.get_cart(user_id, device_id)
+            
+            # Log the complete backend response
+            logger.info(f"[Cart] 📥 Backend VIEW response:")
+            logger.info(f"[Cart] {json.dumps(result, indent=2) if result else 'None'}")
+            logger.info(f"[Cart] 🔍 Response type: {type(result)}")
+            if isinstance(result, list):
+                logger.info(f"[Cart] 📊 Items count in response: {len(result)}")
+            elif isinstance(result, dict):
+                logger.info(f"[Cart] 🔑 Response keys: {list(result.keys())}")
             
             # Handle response based on actual Himira backend format
             if result is None:
@@ -120,10 +154,61 @@ class CartService:
             
             # Process cart items
             if not cart_items:
+                logger.info(f"[Cart] Backend returned empty cart for user {user_id}")
                 return True, " **Your cart is empty**\n\nStart shopping by searching for products!", []
             
+            # Enhanced Multi-Provider Debug Logging
+            logger.info(f"[Cart] Retrieved {len(cart_items)} total items from backend cart")
+            
+            # Analyze provider distribution
+            provider_breakdown = {}
+            domain_breakdown = {}
+            
+            for item in cart_items:
+                # Extract provider info
+                provider_id = item.get('provider_id', 'Unknown')
+                if provider_id != 'Unknown':
+                    # Extract readable provider name
+                    if 'himira' in provider_id.lower():
+                        readable_provider = 'Himira Store'
+                    elif '_ONDC:' in provider_id:
+                        readable_provider = provider_id.split('_ONDC:')[0].replace('hp-seller-preprod.', '').replace('.himira.co.in', '')
+                    else:
+                        readable_provider = provider_id[:30] + '...' if len(provider_id) > 30 else provider_id
+                    
+                    # Count by provider
+                    if readable_provider not in provider_breakdown:
+                        provider_breakdown[readable_provider] = {'count': 0, 'items': []}
+                    provider_breakdown[readable_provider]['count'] += item.get('count', 1)
+                    provider_breakdown[readable_provider]['items'].append({
+                        'name': self._extract_item_name(item),
+                        'id': item.get('item_id', item.get('id', 'Unknown'))[:20],
+                        'quantity': item.get('count', 1)
+                    })
+                    
+                    # Extract domain from provider_id
+                    if '_ONDC:' in provider_id:
+                        domain = provider_id.split('_ONDC:')[1].split('_')[0]
+                        domain_key = f'ONDC:{domain}'
+                        if domain_key not in domain_breakdown:
+                            domain_breakdown[domain_key] = 0
+                        domain_breakdown[domain_key] += item.get('count', 1)
+            
+            # Log comprehensive breakdown
+            logger.info(f"[Cart] Multi-Provider Cart Analysis:")
+            logger.info(f"[Cart] - Total Providers: {len(provider_breakdown)}")
+            logger.info(f"[Cart] - Total Domains: {len(domain_breakdown)}")
+            
+            for provider, data in provider_breakdown.items():
+                logger.info(f"[Cart] - Provider '{provider}': {data['count']} items")
+                for item_info in data['items']:
+                    logger.info(f"[Cart]   * {item_info['name']} (qty: {item_info['quantity']}, id: {item_info['id']})")
+            
+            for domain, count in domain_breakdown.items():
+                logger.info(f"[Cart] - Domain '{domain}': {count} items")
+            
             # Debug: Log raw cart response structure to understand actual data format
-            logger.info(f"[Cart] Raw backend response structure (first item): {json.dumps(cart_items[0], indent=2) if cart_items else 'No items'}")
+            logger.debug(f"[Cart] Raw backend response structure (first item): {json.dumps(cart_items[0], indent=2) if cart_items else 'No items'}")
             
             # Format cart display
             display = self._format_backend_cart_display(cart_items)
@@ -512,31 +597,6 @@ class CartService:
         except Exception as e:
             logger.error(f"[Cart] Error removing multiple items: {e}")
             return False, f" Failed to remove items: {str(e)}"
-    
-    # DEPRECATED: Wishlist functionality removed in pure backend mode
-    async def move_to_wishlist(self, session: Session, item_ids: List[str] = None) -> Tuple[bool, str]:
-        """Deprecated - wishlist operations not implemented in pure backend mode"""
-        return False, " Wishlist functionality not available"
-    
-    # DEPRECATED: Recommendations removed in pure backend mode
-    async def get_cart_recommendations(self, session: Session) -> Optional[List[Dict]]:
-        """Deprecated - recommendations not implemented in pure backend mode"""
-        return None
-
-
-    # DEPRECATED: Analytics removed in pure backend mode
-    def get_cart_analytics(self, session: Session) -> Dict[str, Any]:
-        """Deprecated - analytics not implemented in pure backend mode"""
-        return {
-            'total_items': 0,
-            'total_value': 0,
-            'categories': [],
-            'providers': [],
-            'average_item_price': 0
-        }
-
-
-    # This method is now the main view_cart method above
 
 
 # Singleton instance
