@@ -18,20 +18,13 @@ from ..models.ondc_payload_models import (
 )
 from ..buyer_backend_client import BuyerBackendClient, get_buyer_backend_client
 from ..data_models.biap_context_factory import get_biap_context_factory
-from ..services.product_enrichment_service import get_product_enrichment_service
-from ..services.biap_validation_service import get_biap_validation_service
 from ..services.payment_mock_service import mock_payment_service
 from ..services.cart_service import CartService
 from ..utils.city_code_mapping import get_city_code_by_pincode
 from ..utils.logger import get_logger
 from ..config import config
 
-# Import centralized utilities
-from ..utils.ondc_constants import (
-    get_city_gps,
-    ERROR_MESSAGES
-)
-# Removed location utilities - using real provider data directly from cart items
+# Using real provider data directly from cart items
 
 logger = get_logger(__name__)
 
@@ -49,10 +42,8 @@ class CheckoutService:
         """
         self.buyer_app = buyer_backend_client or get_buyer_backend_client()
         self.context_factory = get_biap_context_factory()
-        self.product_enrichment = get_product_enrichment_service()
-        self.validation = get_biap_validation_service()
         self.cart_service = cart_service
-        logger.info("CheckoutService initialized with BIAP-compatible services")
+        logger.info("CheckoutService initialized with backend services")
     
     async def _poll_for_response(
         self,

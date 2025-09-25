@@ -6,40 +6,76 @@ Based on working curl examples and ONDC specification.
 """
 
 from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass 
 class ONDCContext:
-    """Common ONDC context structure"""
+    """
+    Common ONDC context structure for all operations
+    
+    Attributes:
+        domain: ONDC domain (e.g., "ONDC:RET10" for retail)
+        transaction_id: Unique transaction identifier across ONDC operations
+        city: City code - use user's delivery pincode (not std: format)
+    """
     domain: str = "ONDC:RET10"
     transaction_id: Optional[str] = None
-    city: str = ""  # Use pincode for city in context
+    city: str = ""  # Use user's delivery pincode directly
 
 
 @dataclass
 class SelectItem:
-    """Item structure for SELECT requests"""
-    id: str  # Full ONDC item ID
-    local_id: str  # Local item UUID
+    """
+    Item structure for SELECT requests
+    
+    Attributes:
+        id: Full ONDC item ID (format: provider_domain_provider-uuid_item-uuid)  
+        local_id: Local item UUID for internal reference
+        customisationState: Item customization state (empty dict if none)
+        quantity: Quantity requested (e.g., {"count": 1})
+        provider: Complete provider object from cart data with locations
+        customisations: Available customizations (null if none)
+        hasCustomisations: Boolean indicating if item has customizations
+    """
+    id: str  
+    local_id: str  
     customisationState: Dict = None
-    quantity: Dict[str, int] = None  # {"count": 1}
-    provider: Dict = None  # Provider with id, local_id, locations
+    quantity: Dict[str, int] = None  
+    provider: Dict = None  
     customisations: Optional[Any] = None
     hasCustomisations: bool = False
 
 
 @dataclass
 class SelectMessage:
-    """Message structure for SELECT requests - uses cart.items format"""
-    cart: Dict[str, List[Dict]]  # {"items": [...]}
-    fulfillments: List[Dict]  # GPS and area_code info
+    """
+    Message structure for SELECT requests - CRITICAL: uses cart.items format
+    
+    Attributes:
+        cart: Cart wrapper containing items array {"items": [...]}
+        fulfillments: Delivery fulfillments with user's GPS and area_code
+    
+    Note: 
+        SELECT uses message.cart.items (nested)
+        INIT uses message.items (direct) - different structure!
+    """
+    cart: Dict[str, List[Dict]]  
+    fulfillments: List[Dict]  
 
 
 @dataclass 
 class SelectPayload:
-    """Complete SELECT request payload"""
-    context: Dict[str, str]  # Context with domain, city, transaction_id
+    """
+    Complete SELECT request payload for ONDC backend
+    
+    Attributes:
+        context: ONDC context with user's delivery pincode as city
+        message: Message containing cart.items and fulfillments
+        userId: User identifier from session (e.g., "EUSJ0ypAJJVdo3gXrUJe4uIBwDB2")
+        deviceId: Device identifier from session (e.g., "ed0bda0dd8c167a73721be5bb142dfc9")
+    """
+    context: Dict[str, str]  
     message: SelectMessage
     userId: str
     deviceId: str
@@ -59,17 +95,37 @@ class SelectPayload:
 
 @dataclass
 class InitItem:
-    """Item structure for INIT requests - different from SELECT"""
-    id: str  # Full ONDC item ID  
-    local_id: str  # Local item UUID
-    quantity: Dict[str, int]  # {"count": 1}
-    provider: Dict  # Provider info with id, local_id
+    """
+    Item structure for INIT requests - DIFFERENT from SELECT structure
+    
+    Attributes:
+        id: Full ONDC item ID (same format as SELECT)
+        local_id: Local item UUID for internal reference  
+        quantity: Quantity being ordered (e.g., {"count": 1})
+        provider: Provider info containing id and local_id (simplified vs SELECT)
+    
+    Note:
+        INIT items are simpler than SELECT items (no customizations, etc.)
+    """
+    id: str  
+    local_id: str  
+    quantity: Dict[str, int]  
+    provider: Dict  
 
 
 @dataclass
 class InitBillingInfo:
-    """Billing information for INIT requests"""
-    address: Dict[str, str]  # name, building, street, locality, city, state, etc.
+    """
+    Billing information for INIT requests
+    
+    Attributes:
+        address: Complete billing address with all fields
+                (name, building, street, locality, city, state, area_code)
+        phone: Customer phone number (e.g., "9999999999")
+        name: Customer full name (e.g., "John Doe")
+        email: Customer email address (e.g., "john@example.com")
+    """
+    address: Dict[str, str]  
     phone: str
     name: str
     email: str
@@ -77,21 +133,44 @@ class InitBillingInfo:
 
 @dataclass 
 class InitDeliveryInfo:
-    """Delivery information for INIT requests"""
-    end: Dict[str, Any]  # location with gps, address details
+    """
+    Delivery information for INIT requests
+    
+    Attributes:
+        end: Delivery location with GPS coordinates and complete address
+        type: Delivery type - always "Delivery" (COD not supported)
+    """
+    end: Dict[str, Any]  
     type: str = "Delivery"
 
 
 @dataclass
 class InitPayment:
-    """Payment structure for INIT requests"""
-    type: str = "ON-ORDER"  # Static value - COD not enabled
+    """
+    Payment structure for INIT requests
+    
+    Attributes:
+        type: Payment type - always "ON-ORDER" (prepayment required, no COD)
+    """
+    type: str = "ON-ORDER"  
 
 
 @dataclass
 class InitMessage:
-    """Message structure for INIT requests - items at root level (NOT cart.items)"""
-    items: List[Dict]  # Items directly under message
+    """
+    Message structure for INIT requests - CRITICAL: different from SELECT
+    
+    Attributes:
+        items: Items directly under message (NOT message.cart.items like SELECT)
+        billing_info: Customer billing information
+        delivery_info: Delivery location and preferences
+        payment: Payment method (always ON-ORDER)
+    
+    Note:
+        INIT uses message.items (direct)
+        SELECT uses message.cart.items (nested) - different structure!
+    """
+    items: List[Dict]  
     billing_info: InitBillingInfo
     delivery_info: InitDeliveryInfo  
     payment: InitPayment
@@ -99,8 +178,15 @@ class InitMessage:
 
 @dataclass
 class InitPayload:
-    """Complete INIT request payload"""
-    context: Dict[str, str]  # Context with transaction_id from SELECT
+    """
+    Complete INIT request payload for ONDC backend
+    
+    Attributes:
+        context: ONDC context with transaction_id from SELECT response
+        message: Message with direct items and customer info
+        deviceId: Device identifier (no userId in INIT requests)
+    """
+    context: Dict[str, str]  
     message: InitMessage
     deviceId: str
     
@@ -195,3 +281,159 @@ INIT_MESSAGE_REQUIRED_FIELDS = ['items', 'billing_info', 'delivery_info', 'payme
 # Error messages
 SELECT_VALIDATION_ERROR = "SELECT payload must have message.cart.items structure"
 INIT_VALIDATION_ERROR = "INIT payload must have message.items structure (NOT message.cart.items)"
+
+
+# Response Models for ONDC Operations
+
+@dataclass
+class QuoteItem:
+    """Item in a SELECT response quote"""
+    id: str
+    local_id: str
+    quantity: Dict[str, int]
+    price: Dict[str, Any]  # Contains value, currency
+    fulfillment_id: str
+    provider_id: str
+    
+
+@dataclass
+class DeliveryOption:
+    """Delivery option from SELECT response"""
+    fulfillment_id: str
+    type: str  # "Delivery", "Self-Pickup"
+    tracking: bool
+    delivery_time: Optional[str] = None
+    delivery_charge: Optional[float] = None
+    
+
+@dataclass
+class ProviderQuote:
+    """Quote from a single provider in SELECT response"""
+    provider_id: str
+    provider_name: str
+    items: List[QuoteItem]
+    fulfillments: List[DeliveryOption]
+    total_value: float
+    delivery_charges: float
+    
+
+@dataclass
+class SelectResponse:
+    """Complete response structure for SELECT operations"""
+    success: bool
+    message: str
+    message_id: Optional[str] = None
+    transaction_id: Optional[str] = None
+    providers: List[ProviderQuote] = field(default_factory=list)
+    total_items: int = 0
+    grand_total: float = 0.0
+    stage: str = "select"
+    next_step: Optional[str] = None
+    
+
+@dataclass
+class OrderSummary:
+    """Order summary from INIT response"""
+    order_id: str
+    total_value: float
+    delivery_charges: float
+    taxes: float
+    grand_total: float
+    estimated_delivery: Optional[str] = None
+    
+
+@dataclass
+class PaymentDetails:
+    """Payment information from INIT response"""
+    type: str  # "ON-ORDER", "COD", etc.
+    status: str
+    collected_by: str
+    payment_methods: List[str] = field(default_factory=list)
+    
+
+@dataclass
+class InitResponse:
+    """Complete response structure for INIT operations"""
+    success: bool
+    message: str
+    message_id: Optional[str] = None
+    transaction_id: Optional[str] = None
+    order_summary: Optional[OrderSummary] = None
+    payment_details: Optional[PaymentDetails] = None
+    stage: str = "init"
+    next_step: Optional[str] = None
+
+
+@dataclass
+class ConfirmResponse:
+    """Complete response structure for CONFIRM operations"""
+    success: bool
+    message: str
+    order_id: Optional[str] = None
+    tracking_id: Optional[str] = None
+    payment_status: str = "PENDING"
+    estimated_delivery: Optional[str] = None
+    stage: str = "confirm"
+
+
+# Response factory functions
+
+def create_select_response(
+    success: bool,
+    message: str,
+    providers: List[ProviderQuote] = None,
+    message_id: str = None,
+    transaction_id: str = None
+) -> SelectResponse:
+    """Create a standardized SELECT response"""
+    providers = providers or []
+    total_items = sum(len(p.items) for p in providers)
+    grand_total = sum(p.total_value + p.delivery_charges for p in providers)
+    
+    return SelectResponse(
+        success=success,
+        message=message,
+        message_id=message_id,
+        transaction_id=transaction_id,
+        providers=providers,
+        total_items=total_items,
+        grand_total=grand_total,
+        next_step="initialize_order" if success else None
+    )
+
+
+def create_init_response(
+    success: bool,
+    message: str,
+    order_summary: OrderSummary = None,
+    payment_details: PaymentDetails = None,
+    message_id: str = None,
+    transaction_id: str = None
+) -> InitResponse:
+    """Create a standardized INIT response"""
+    return InitResponse(
+        success=success,
+        message=message,
+        message_id=message_id,
+        transaction_id=transaction_id,
+        order_summary=order_summary,
+        payment_details=payment_details,
+        next_step="confirm_order" if success else None
+    )
+
+
+def create_confirm_response(
+    success: bool,
+    message: str,
+    order_id: str = None,
+    tracking_id: str = None,
+    payment_status: str = "PENDING"
+) -> ConfirmResponse:
+    """Create a standardized CONFIRM response"""
+    return ConfirmResponse(
+        success=success,
+        message=message,
+        order_id=order_id,
+        tracking_id=tracking_id,
+        payment_status=payment_status
+    )
