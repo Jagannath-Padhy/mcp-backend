@@ -26,7 +26,6 @@ from mcp_agent.workflows.llm.augmented_llm import RequestParams
 
 # Import MCP SessionService for unified session management
 import sys
-import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ondc-shopping-mcp'))
 from src.services.session_service import get_session_service
 
@@ -42,6 +41,7 @@ mcp_app = None
 agent = None
 llm = None
 session_llms = {}  # Session-specific LLM instances with conversation history
+tool_results_cache = {}  # Simple cache to capture tool results for API responses
 
 # ============================================================================
 # Helper Functions for DRY Code
@@ -54,6 +54,123 @@ def generate_device_id() -> str:
 def generate_session_id() -> str:
     """Generate a unique session ID."""
     return f"session_{uuid.uuid4().hex}"
+
+def extract_minimal_product_info(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract only essential product fields for frontend rendering, removing data bloat"""
+    if not isinstance(data, dict):
+        return data
+    
+    # If this is a products array, filter each product
+    if 'products' in data and isinstance(data['products'], list):
+        filtered_data = data.copy()
+        filtered_products = []
+        
+        for product in data['products']:
+            if isinstance(product, dict):
+                filtered_product = {
+                    # Essential item fields
+                    'id': product.get('id'),
+                    'local_id': product.get('local_id'),
+                    'name': product.get('name'),
+                    'description': product.get('description'),
+                    'price': product.get('price'),
+                    'category': product.get('category'),
+                    
+                    # Provider info (essential fields only)
+                    'provider': {
+                        'id': product.get('provider', {}).get('id'),
+                        'local_id': product.get('provider', {}).get('local_id'),
+                        'name': product.get('provider', {}).get('name')
+                    } if product.get('provider') else None,
+                    
+                    # Location/serviceability
+                    'location': {
+                        'id': product.get('location', {}).get('id'),
+                        'local_id': product.get('location', {}).get('local_id'),
+                        'serviceability': product.get('location', {}).get('serviceability')
+                    } if product.get('location') else None,
+                    
+                    # Essential metadata
+                    'images': product.get('images'),
+                    'stock_availability': product.get('stock_availability'),
+                    'availability_status': product.get('availability_status'),
+                    'rating': product.get('rating')
+                }
+                
+                # Remove None values to keep response clean
+                filtered_product = {k: v for k, v in filtered_product.items() if v is not None}
+                if filtered_product.get('provider'):
+                    filtered_product['provider'] = {k: v for k, v in filtered_product['provider'].items() if v is not None}
+                if filtered_product.get('location'):
+                    filtered_product['location'] = {k: v for k, v in filtered_product['location'].items() if v is not None}
+                    
+                filtered_products.append(filtered_product)
+        
+        filtered_data['products'] = filtered_products
+        
+        # Keep other top-level fields but remove heavy ones
+        for key in list(filtered_data.keys()):
+            if key.startswith('_raw') or key in ['detailed_info', 'full_ondc_data']:
+                del filtered_data[key]
+        
+        logger.info(f"[Product Filter] Filtered {len(data['products'])} products, "
+                   f"reduced from {len(str(data))} to {len(str(filtered_data))} chars")
+        return filtered_data
+    
+    # For non-product data, just remove heavy fields
+    if isinstance(data, dict):
+        filtered_data = {k: v for k, v in data.items() 
+                        if not k.startswith('_raw') and k not in ['detailed_info', 'full_ondc_data']}
+        return filtered_data
+    
+    return data
+
+def capture_tool_result_for_session(session_id: str, tool_name: str, tool_result: Any):
+    """Capture tool result for later use in API response"""
+    try:
+        # Extract actual content from CallToolResult if needed
+        actual_result = tool_result
+        
+        # Handle mcp.types.CallToolResult objects
+        if hasattr(tool_result, 'content') and tool_result.content:
+            try:
+                # Try to parse the content as JSON
+                if isinstance(tool_result.content, list) and len(tool_result.content) > 0:
+                    # Get the first content item
+                    content_item = tool_result.content[0]
+                    if hasattr(content_item, 'text'):
+                        actual_result = json.loads(content_item.text)
+                        logger.info(f"[Tool Capture] Extracted content from CallToolResult for {tool_name}")
+                elif hasattr(tool_result.content, 'text'):
+                    actual_result = json.loads(tool_result.content.text)
+                    logger.info(f"[Tool Capture] Extracted text content from CallToolResult for {tool_name}")
+            except (json.JSONDecodeError, AttributeError) as e:
+                logger.warning(f"[Tool Capture] Failed to parse CallToolResult content: {e}")
+                # Fallback to original result
+                actual_result = tool_result
+        
+        # Store the processed result
+        tool_results_cache[session_id] = {
+            'tool_name': tool_name,
+            'result': actual_result,
+            'timestamp': datetime.now()
+        }
+        
+        # Debug: Log the structure of captured tool result
+        if isinstance(actual_result, dict):
+            logger.info(f"[Tool Capture] Captured {tool_name} with keys: {list(actual_result.keys())}")
+            if 'products' in actual_result:
+                product_count = len(actual_result['products']) if isinstance(actual_result['products'], list) else 0
+                logger.info(f"[Tool Capture] Found {product_count} products in result")
+        else:
+            logger.info(f"[Tool Capture] Captured {tool_name} result type: {type(actual_result)}")
+            
+    except Exception as e:
+        logger.warning(f"[Tool Capture] Failed to capture tool result: {e}")
+
+def get_captured_tool_result(session_id: str) -> Optional[Dict[str, Any]]:
+    """Get the last captured tool result for a session"""
+    return tool_results_cache.get(session_id)
 
 
 def check_agent_ready():
@@ -117,25 +234,63 @@ def get_initialization_required_response() -> str:
 def determine_context_type(tool_result: Dict[str, Any]) -> tuple[str, bool]:
     """Determine context type and action requirement from tool result.
     
+    Enhanced with granular context detection for better frontend routing.
+    
     Returns:
         tuple: (context_type, action_required)
     """
     if not isinstance(tool_result, dict):
         return None, False
     
-    # Check for known data patterns
-    for key in tool_result:
-        match key:
-            case 'products':
-                return 'products', False
-            case 'cart' | 'cart_summary':
-                return 'cart', False
-            case 'order_id' | 'order_details':
-                return 'order', False
-            case 'quote_data' | 'delivery':
-                return 'checkout', True
-            case 'next_step' | 'stage':
-                return 'checkout', True
+    # 🚀 ENHANCED: Granular context detection
+    
+    # Product search results
+    if 'products' in tool_result:
+        products = tool_result['products']
+        if products and len(products) > 0:
+            return 'search_results', False
+        else:
+            return 'no_results', False
+    
+    # Cart operations - differentiate between view and update
+    if 'cart' in tool_result or 'cart_summary' in tool_result:
+        return 'cart_view', False
+    
+    # Single item operations (add to cart)
+    if 'item_added' in tool_result or 'product' in tool_result:
+        return 'cart_updated', False
+    
+    # Order operations - differentiate between confirmed and details
+    if 'order_id' in tool_result:
+        return 'order_confirmed', False
+    elif 'order_details' in tool_result:
+        return 'order_details', False
+    
+    # Checkout flow - differentiate stages
+    if 'quote_data' in tool_result or 'quotes' in tool_result or 'delivery' in tool_result:
+        return 'checkout_quotes', True
+    elif 'next_step' in tool_result or 'stage' in tool_result:
+        return 'checkout_flow', True
+    
+    # Payment operations
+    if any(key in tool_result for key in ['payment_id', 'payment_status', 'transaction_id']):
+        return 'payment_status', False
+    
+    # Error states
+    if 'error' in tool_result or 'errors' in tool_result:
+        return 'error_state', False
+    
+    # Success messages
+    if 'success' in tool_result and tool_result.get('success') is True:
+        return 'success_message', False
+    
+    # Session/initialization responses
+    if 'session_id' in tool_result and 'device_id' in tool_result:
+        return 'session_initialized', False
+    
+    # Default fallback for any data
+    if tool_result:
+        return 'data_response', False
     
     return None, False
 
@@ -166,7 +321,7 @@ async def lifespan(app: FastAPI):
             settings="/app/mcp_agent.config.yaml"
         )
         # Initialize MCP app context
-        async with mcp_app.run() as app_context:
+        async with mcp_app.run():
             
             # Create agent connected to MCP server via STDIO
             agent = Agent(
@@ -319,8 +474,76 @@ async def health_check(request: Request):
         "status": "healthy" if llm else "initializing",
         "timestamp": datetime.now(),
         "agent_ready": llm is not None,
-        "active_sessions": active_sessions
+        "active_sessions": active_sessions,
+        "enhanced_features": {
+            "tool_call_detection": True,
+            "parallel_extraction": True,
+            "performance_monitoring": True
+        }
     }
+
+# Performance metrics endpoint
+@app.get("/api/v1/metrics/performance")
+@limiter.limit("30/minute")
+async def get_performance_metrics(request: Request):
+    """Get tool call performance metrics and optimization insights"""
+    if not llm:
+        raise HTTPException(status_code=503, detail="LLM not ready")
+    
+    try:
+        # Get metrics from the enhanced LLM
+        metrics = llm.get_performance_metrics()
+        
+        # Add system-wide metrics
+        session_service = get_session_service()
+        system_metrics = {
+            "system_status": {
+                "active_sessions": len(session_llms),
+                "total_session_files": len([f for f in session_service.storage_path.glob("*.json")]),
+                "api_status": "operational"
+            },
+            "llm_metrics": metrics,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        return system_metrics
+        
+    except Exception as e:
+        logger.error(f"Error retrieving performance metrics: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get metrics: {str(e)}")
+
+# Reset metrics endpoint (useful for testing)
+@app.post("/api/v1/metrics/reset")
+@limiter.limit("5/minute")
+async def reset_performance_metrics(request: Request):
+    """Reset performance metrics (useful for testing and fresh starts)"""
+    if not llm:
+        raise HTTPException(status_code=503, detail="LLM not ready")
+    
+    try:
+        # Reset metrics in the main LLM
+        await llm.reset_metrics()
+        
+        # Reset metrics in all session LLMs
+        reset_count = 0
+        for session_id, session_llm in session_llms.items():
+            await session_llm.reset_metrics()
+            reset_count += 1
+        
+        logger.info(f"Performance metrics reset for main LLM and {reset_count} session LLMs")
+        
+        return {
+            "message": "Performance metrics reset successfully",
+            "reset_targets": {
+                "main_llm": True,
+                "session_llms_count": reset_count
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error resetting performance metrics: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to reset metrics: {str(e)}")
 
 # Session management
 @app.post("/api/v1/sessions", response_model=SessionResponse)
@@ -437,9 +660,6 @@ async def chat(request: Request, chat_req: ChatRequest):
         # This ensures all MCP tool calls use the correct chat API session
         # Uses file-based approach since MCP server runs in separate process
         try:
-            import tempfile
-            import os
-            
             # Create session context file that MCP server can read
             context_dir = os.path.expanduser("~/.ondc-mcp")
             os.makedirs(context_dir, exist_ok=True)
@@ -448,12 +668,17 @@ async def chat(request: Request, chat_req: ChatRequest):
             with open(context_file, 'w') as f:
                 f.write(session_id)
             
-            logger.info(f"Set MCP session context file: {session_id}")
+            logger.info("Set MCP session context file: %s", session_id)
         except Exception as e:
-            logger.warning(f"Failed to set MCP session context file: {e}")
+            logger.warning("Failed to set MCP session context file: %s", e)
+        
+        # Session context is managed via file-based approach for MCP tools
         
         # Get session-specific LLM with conversation history
         session_llm = await get_session_llm(session_id)
+        
+        # Debug: Verify enhanced LLM is being used
+        logger.debug("🔍 Using LLM type: %s for session: %s", type(session_llm).__name__, session_id)
         
         # Enhance message with context (simplified, no need for manual injection now)
         enhanced_message = f"[Session: {session_id}] [Device: {device_id}] {chat_req.message}"
@@ -466,11 +691,37 @@ async def chat(request: Request, chat_req: ChatRequest):
             maxTokens=2000
         )
         
-        # Get AI response using full conversation loop
-        contents = await session_llm.generate(
-            message=enhanced_message,
-            request_params=request_params
-        )
+        # Clear any previous tool results for this session
+        tool_results_cache.pop(session_id, None)
+        
+        # Temporarily patch agent to capture tool results
+        original_call_tool = None
+        if agent and hasattr(agent, 'call_tool'):
+            original_call_tool = agent.call_tool
+            
+            async def capturing_call_tool(*args, **kwargs):
+                # Call original tool method
+                result = await original_call_tool(*args, **kwargs)
+                
+                # Capture the result for this session
+                tool_name = args[0] if args else kwargs.get('name', 'unknown_tool')
+                capture_tool_result_for_session(session_id, tool_name, result)
+                
+                return result
+            
+            # Temporarily replace the method
+            agent.call_tool = capturing_call_tool
+        
+        try:
+            # Get AI response using full conversation loop
+            contents = await session_llm.generate(
+                message=enhanced_message,
+                request_params=request_params
+            )
+        finally:
+            # Restore original method
+            if original_call_tool:
+                agent.call_tool = original_call_tool
         
         # Process the response using proper MCP integration
         response_text = ""
@@ -480,28 +731,66 @@ async def chat(request: Request, chat_req: ChatRequest):
         
         # The GoogleAugmentedLLM should handle tool calling automatically
         # We just need to extract the final response and any structured data
+        logger.debug(f"[Chat API] Processing {len(contents) if contents else 0} content items")
+        
         if contents and len(contents) > 0:
-            for content in contents:
+            for content_idx, content in enumerate(contents):
+                logger.debug(f"[Chat API] Processing content {content_idx}, parts: {len(content.parts) if content.parts else 0}")
                 if content.parts:
-                    for part in content.parts:
+                    for part_idx, part in enumerate(content.parts):
+                        logger.debug(f"[Chat API] Processing part {part_idx}, type: {type(part)}")
                         if hasattr(part, 'text') and part.text:
                             response_text += part.text
+                            logger.debug(f"[Chat API] Added text part: {len(part.text)} chars")
                         elif hasattr(part, 'function_response'):
+                            logger.debug("[Chat API] Found function_response part")
                             # Handle tool execution results if present
                             if hasattr(part.function_response, 'content'):
+                                logger.debug(f"[Chat API] function_response has content: {len(part.function_response.content)} chars")
                                 try:
                                     # Parse tool result as JSON if possible
                                     tool_result = json.loads(part.function_response.content)
-                                    structured_data = tool_result
+                                    logger.debug(f"[Chat API] Parsed tool result with keys: {list(tool_result.keys())}")
                                     
-                                    # Tool result processing - no longer need to track initialization 
-                                    # since SessionService handles this automatically
+                                    # 🚀 ENHANCED: Extract structured data from MCP response
+                                    if '_structured_data' in tool_result:
+                                        structured_data = tool_result['_structured_data']
+                                        logger.info(f"[Chat API] ✅ Extracted structured data keys: {list(structured_data.keys()) if structured_data else 'None'}")
                                     
-                                    # Determine context type using helper function
-                                    context_type, action_required = determine_context_type(tool_result)
-                                except (json.JSONDecodeError, AttributeError):
+                                    # 🚀 ENHANCED: Extract context type from MCP response
+                                    if '_context_type' in tool_result:
+                                        context_type = tool_result['_context_type']
+                                        logger.info(f"[Chat API] ✅ Extracted context type: {context_type}")
+                                    
+                                    
+                                    # Extract structured data directly from tool result
+                                    if not structured_data:
+                                        # Check for products array (search results)
+                                        if 'products' in tool_result and tool_result['products']:
+                                            structured_data = tool_result
+                                            context_type = 'search_results'
+                                            logger.info("[Chat API] ✅ Extracted search products data")
+                                        
+                                        # Check for cart data
+                                        elif 'cart' in tool_result or 'total_items' in tool_result:
+                                            structured_data = tool_result
+                                            context_type = 'cart_view'
+                                            logger.info("[Chat API] ✅ Extracted cart data")
+                                        
+                                        # Fallback to legacy context detection
+                                        else:
+                                            structured_data = tool_result
+                                            context_type, action_required = determine_context_type(tool_result)
+                                            logger.info("[Chat API] Using legacy context detection: %s", context_type)
+                                    
+                                except (json.JSONDecodeError, AttributeError) as e:
                                     # If not JSON or no content attribute, just add to response text
+                                    logger.warning(f"[Chat API] Failed to parse function_response as JSON: {e}")
                                     response_text += str(part.function_response)
+                            else:
+                                logger.debug("[Chat API] function_response has no content attribute")
+                        else:
+                            logger.debug(f"[Chat API] Unknown part type: {type(part)}")
         
         # Clean up response text - remove any "None" prefix
         if response_text.startswith("None"):
@@ -509,16 +798,59 @@ async def chat(request: Request, chat_req: ChatRequest):
         
         response = response_text or "I'm ready to help you with your shopping needs!"
         
+        # Check for captured tool results if no structured data was found via function_response
+        if not structured_data:
+            captured_result = get_captured_tool_result(session_id)
+            if captured_result:
+                tool_result = captured_result['result']
+                tool_name = captured_result['tool_name']
+                
+                logger.info(f"[Tool Capture] Using captured result from {tool_name}")
+                
+                # Debug: Log the captured result structure
+                if isinstance(tool_result, dict):
+                    logger.info(f"[Tool Capture] Captured result keys: {list(tool_result.keys())}")
+                    logger.info(f"[Tool Capture] Has products: {'products' in tool_result}")
+                    if 'products' in tool_result:
+                        products = tool_result['products']
+                        logger.info(f"[Tool Capture] Products type: {type(products)}, count: {len(products) if isinstance(products, list) else 'not list'}")
+                
+                # Apply the same logic as the function_response processing
+                if isinstance(tool_result, dict):
+                    # Check for products array (search results)
+                    if 'products' in tool_result and tool_result['products']:
+                        structured_data = tool_result
+                        context_type = 'search_results'
+                        logger.info("[Tool Capture] ✅ Extracted search products from captured result")
+                    
+                    # Check for cart data  
+                    elif 'cart' in tool_result or 'total_items' in tool_result:
+                        structured_data = tool_result
+                        context_type = 'cart_view'
+                        logger.info("[Tool Capture] ✅ Extracted cart data from captured result")
+                    
+                    # Use general context detection
+                    else:
+                        structured_data = tool_result
+                        context_type, action_required = determine_context_type(tool_result)
+                        logger.info(f"[Tool Capture] Using context detection: {context_type}")
+                else:
+                    logger.warning(f"[Tool Capture] Tool result is not dict: {type(tool_result)}")
+        
+        # Apply minimal product info extraction to reduce data bloat
+        if structured_data:
+            structured_data = extract_minimal_product_info(structured_data)
+            logger.info("[Chat API] Applied minimal product filtering to structured data")
+        
         # IMPORTANT: Clean up session context file AFTER LLM response is processed
         # This ensures MCP tools can access the session during the request
         try:
-            import os
             context_file = os.path.expanduser("~/.ondc-mcp/chat_session_context.txt")
             if os.path.exists(context_file):
                 os.remove(context_file)
-                logger.debug(f"Cleaned up MCP session context file after LLM response")
+                logger.debug("Cleaned up MCP session context file after LLM response")
         except Exception as e:
-            logger.debug(f"Session context file cleanup failed (not critical): {e}")
+            logger.debug("Session context file cleanup failed (not critical): %s", e)
 
         # FIX: Extract actual device_id from session after MCP tool execution
         # This ensures we return the correct device_id that was set by the MCP tool
@@ -536,9 +868,9 @@ async def chat(request: Request, chat_req: ChatRequest):
                 
                 # Also log if they're different to confirm the fix is working
                 if actual_device_id != device_id:
-                    logger.info(f"[DEVICE_ID FIX] ✅ SUCCESS: Device ID corrected from generated to user-provided")
+                    logger.info("[DEVICE_ID FIX] ✅ SUCCESS: Device ID corrected from generated to user-provided")
                 else:
-                    logger.info(f"[DEVICE_ID FIX] ⚠️ WARNING: Device IDs match, might be using fallback")
+                    logger.info("[DEVICE_ID FIX] ⚠️ WARNING: Device IDs match, might be using fallback")
             else:
                 # Fallback to generated device_id if session lookup fails
                 actual_device_id = device_id
@@ -563,13 +895,12 @@ async def chat(request: Request, chat_req: ChatRequest):
         logger.error(f"Chat error: {e}")
         # Clean up session context file on error too
         try:
-            import os
             context_file = os.path.expanduser("~/.ondc-mcp/chat_session_context.txt")
             if os.path.exists(context_file):
                 os.remove(context_file)
-                logger.debug(f"Cleaned up MCP session context file on error")
+                logger.debug("Cleaned up MCP session context file on error")
         except Exception as cleanup_error:
-            logger.debug(f"Session context file cleanup on error failed: {cleanup_error}")
+            logger.debug("Session context file cleanup on error failed: %s", cleanup_error)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Search endpoint
@@ -630,30 +961,29 @@ async def manage_cart(request: Request, device_id: str, cart_req: CartRequest):
         if cart_req.item:
             cart_prompt += f" with item: {cart_req.item}"
         
-        # Map cart actions to appropriate tools using match/case
-        match cart_req.action:
-            case "add" if cart_req.item:
-                tool_name = "add_to_cart"
-                arguments = {"item": cart_req.item, "quantity": cart_req.quantity}
-            case "view":
-                tool_name = "view_cart"
-                arguments = {"device_id": device_id}
-            case "remove" if cart_req.item:
-                tool_name = "remove_from_cart"
-                arguments = {"item_id": cart_req.item.get("id", "")}
-            case "update" if cart_req.item:
-                tool_name = "update_cart_quantity"
-                arguments = {"item_id": cart_req.item.get("id", ""), "quantity": cart_req.quantity}
-            case "clear":
-                tool_name = "clear_cart"
-                arguments = {"device_id": device_id}
-            case _:
-                return {
-                    "device_id": device_id,
-                    "action": cart_req.action,
-                    "result": f"Unsupported cart action: {cart_req.action}",
-                    "timestamp": datetime.now()
-                }
+        # Map cart actions to appropriate tools using if/elif
+        if cart_req.action == "add" and cart_req.item:
+            tool_name = "add_to_cart"
+            arguments = {"item": cart_req.item, "quantity": cart_req.quantity}
+        elif cart_req.action == "view":
+            tool_name = "view_cart"
+            arguments = {"device_id": device_id}
+        elif cart_req.action == "remove" and cart_req.item:
+            tool_name = "remove_from_cart"
+            arguments = {"item_id": cart_req.item.get("id", "")}
+        elif cart_req.action == "update" and cart_req.item:
+            tool_name = "update_cart_quantity"
+            arguments = {"item_id": cart_req.item.get("id", ""), "quantity": cart_req.quantity}
+        elif cart_req.action == "clear":
+            tool_name = "clear_cart"
+            arguments = {"device_id": device_id}
+        else:
+            return {
+                "device_id": device_id,
+                "action": cart_req.action,
+                "result": f"Unsupported cart action: {cart_req.action}",
+                "timestamp": datetime.now()
+            }
         
         # Call the appropriate cart tool
         try:
@@ -692,7 +1022,9 @@ async def root():
             "chat": "/api/v1/chat",
             "sessions": "/api/v1/sessions",
             "search": "/api/v1/search",
-            "cart": "/api/v1/cart/{device_id}"
+            "cart": "/api/v1/cart/{device_id}",
+            "metrics": "/api/v1/metrics/performance",
+            "metrics_reset": "/api/v1/metrics/reset"
         },
         "docs": "/docs",
         "active_sessions": len(session_service.sessions_cache)

@@ -92,6 +92,7 @@ def format_mcp_response(success: bool, message: str, session_id: str,
     - session: dict (for session persistence)
     - Additional data fields
     - Anti-caching flags to force fresh AI agent execution
+    - _structured_data: Enhanced structured data for chat API extraction
     """
     import uuid
     from datetime import datetime
@@ -118,8 +119,17 @@ def format_mcp_response(success: bool, message: str, session_id: str,
     # Add any extra data
     response.update(extra_data)
     
+    # 🚀 NEW: Add structured data for chat API extraction
+    structured_data = _extract_structured_data(extra_data)
+    if structured_data:
+        response['_structured_data'] = structured_data
+        response['_context_type'] = _determine_data_context(structured_data)
+        response['_ui_hints'] = _generate_ui_hints(structured_data)
+    
     # Log MCP response for debugging
     logger.debug(f"[MCP Response] Session: {session_id[:16]}... Success: {success}")
+    if structured_data:
+        logger.debug(f"[MCP Structured Data] Context: {response.get('_context_type')}, Keys: {list(structured_data.keys())}")
     if not success:
         logger.error(f"[MCP Error] {message}")
     
@@ -264,3 +274,224 @@ def get_services():
         'order_service': get_order_service(),
         'payment_service': get_payment_service()
     }
+
+
+# 🚀 NEW: Enhanced structured data extraction for chat API
+
+def _extract_structured_data(extra_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Extract and organize structured data for frontend consumption
+    
+    Args:
+        extra_data: Raw MCP tool response data
+        
+    Returns:
+        Structured data dictionary ready for frontend or None
+    """
+    if not extra_data:
+        return None
+    
+    structured = {}
+    
+    # Extract products (search results)
+    if 'products' in extra_data:
+        products = extra_data['products']
+        if products and len(products) > 0:
+            structured['products'] = products  # Already formatted by format_products_for_display
+            structured['total_results'] = len(products)
+            
+            # Extract search metadata if present
+            if 'search_query' in extra_data:
+                structured['search_query'] = extra_data['search_query']
+            if 'search_metadata' in extra_data:
+                structured.update(extra_data['search_metadata'])
+    
+    # Extract cart data
+    if 'cart' in extra_data or 'cart_summary' in extra_data:
+        cart_data = extra_data.get('cart') or extra_data.get('cart_summary')
+        if cart_data:
+            structured['cart'] = cart_data
+            # Extract cart metadata
+            for key in ['total', 'total_amount', 'item_count', 'items']:
+                if key in extra_data:
+                    structured[key] = extra_data[key]
+    
+    # Extract single item (add to cart result)
+    if 'item_added' in extra_data or 'product' in extra_data:
+        item_data = extra_data.get('item_added') or extra_data.get('product')
+        if item_data:
+            structured['item'] = item_data
+            # Include quantity if present
+            if 'quantity' in extra_data:
+                structured['quantity'] = extra_data['quantity']
+    
+    # Extract order data
+    if 'order_id' in extra_data or 'order_details' in extra_data:
+        structured['order'] = {}
+        for key in ['order_id', 'order_details', 'tracking_info', 'status']:
+            if key in extra_data:
+                structured['order'][key] = extra_data[key]
+    
+    # Extract checkout/delivery data
+    if any(key in extra_data for key in ['quote_data', 'delivery', 'quotes', 'delivery_options']):
+        structured['checkout'] = {}
+        for key in ['quote_data', 'delivery', 'quotes', 'delivery_options', 'selected_quote']:
+            if key in extra_data:
+                structured['checkout'][key] = extra_data[key]
+    
+    # Extract payment data
+    if any(key in extra_data for key in ['payment_id', 'payment_status', 'transaction_id']):
+        structured['payment'] = {}
+        for key in ['payment_id', 'payment_status', 'transaction_id', 'amount']:
+            if key in extra_data:
+                structured['payment'][key] = extra_data[key]
+    
+    # Extract error information
+    if 'error' in extra_data or 'errors' in extra_data:
+        structured['error'] = extra_data.get('error') or extra_data.get('errors')
+    
+    logger.debug(f"[Structured Data] Extracted keys: {list(structured.keys())}")
+    return structured if structured else None
+
+
+def _determine_data_context(structured_data: Dict[str, Any]) -> str:
+    """Determine the context type based on structured data
+    
+    Args:
+        structured_data: Structured data dictionary
+        
+    Returns:
+        Context type string for frontend routing
+    """
+    if not structured_data:
+        return 'message'
+    
+    # Product search results
+    if 'products' in structured_data:
+        product_count = structured_data.get('total_results', 0)
+        if product_count > 0:
+            return 'search_results'
+        else:
+            return 'no_results'
+    
+    # Cart operations
+    if 'cart' in structured_data:
+        return 'cart_view'
+    
+    # Single item added
+    if 'item' in structured_data:
+        return 'cart_updated'
+    
+    # Order operations
+    if 'order' in structured_data:
+        if 'order_id' in structured_data['order']:
+            return 'order_confirmed'
+        else:
+            return 'order_details'
+    
+    # Checkout flow
+    if 'checkout' in structured_data:
+        if 'quotes' in structured_data['checkout'] or 'delivery_options' in structured_data['checkout']:
+            return 'checkout_quotes'
+        else:
+            return 'checkout_flow'
+    
+    # Payment operations
+    if 'payment' in structured_data:
+        return 'payment_status'
+    
+    # Error states
+    if 'error' in structured_data:
+        return 'error_state'
+    
+    # Default fallback
+    return 'data_response'
+
+
+def _generate_ui_hints(structured_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate UI hints for frontend rendering
+    
+    Args:
+        structured_data: Structured data dictionary
+        
+    Returns:
+        UI hints dictionary with rendering guidance
+    """
+    hints = {
+        'render_as': 'default',
+        'enable_actions': [],
+        'suggested_actions': [],
+        'display_priority': 'normal'
+    }
+    
+    # Product search results
+    if 'products' in structured_data:
+        product_count = structured_data.get('total_results', 0)
+        if product_count > 0:
+            hints.update({
+                'render_as': 'product_grid',
+                'enable_actions': ['add_to_cart', 'view_details', 'compare'],
+                'suggested_actions': ['Would you like to add any of these to your cart?'],
+                'display_priority': 'high'
+            })
+        else:
+            hints.update({
+                'render_as': 'empty_state',
+                'suggested_actions': ['Try a different search term', 'Browse categories'],
+                'display_priority': 'normal'
+            })
+    
+    # Cart view
+    elif 'cart' in structured_data:
+        hints.update({
+            'render_as': 'cart_summary',
+            'enable_actions': ['update_quantity', 'remove_item', 'checkout'],
+            'suggested_actions': ['Ready to checkout?', 'Continue shopping'],
+            'display_priority': 'high'
+        })
+    
+    # Item added to cart
+    elif 'item' in structured_data:
+        hints.update({
+            'render_as': 'success_notification',
+            'enable_actions': ['view_cart', 'checkout', 'continue_shopping'],
+            'suggested_actions': ['View your cart', 'Continue shopping'],
+            'display_priority': 'medium'
+        })
+    
+    # Checkout flow
+    elif 'checkout' in structured_data:
+        if 'quotes' in structured_data['checkout']:
+            hints.update({
+                'render_as': 'delivery_options',
+                'enable_actions': ['select_delivery', 'change_address'],
+                'suggested_actions': ['Please select a delivery option'],
+                'display_priority': 'high'
+            })
+        else:
+            hints.update({
+                'render_as': 'checkout_form',
+                'enable_actions': ['confirm_order', 'edit_details'],
+                'suggested_actions': ['Review and confirm your order'],
+                'display_priority': 'high'
+            })
+    
+    # Order confirmed
+    elif 'order' in structured_data and 'order_id' in structured_data['order']:
+        hints.update({
+            'render_as': 'order_confirmation',
+            'enable_actions': ['track_order', 'download_receipt'],
+            'suggested_actions': ['Track your order', 'Continue shopping'],
+            'display_priority': 'high'
+        })
+    
+    # Error states
+    elif 'error' in structured_data:
+        hints.update({
+            'render_as': 'error_message',
+            'enable_actions': ['retry', 'help'],
+            'suggested_actions': ['Please try again or contact support'],
+            'display_priority': 'high'
+        })
+    
+    logger.debug(f"[UI Hints] Generated hints: {hints}")
+    return hints
