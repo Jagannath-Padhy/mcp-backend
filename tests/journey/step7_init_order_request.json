@@ -1,0 +1,5 @@
+{
+  "message": "Great! Please initialize my order with these details: Customer name is Test User, building is 123 Test Building, street is MG Road, locality is Koramangala, phone is 9999999999, email is test@example.com, and I want to pay via razorpay",
+  "session_id": "session_62846bbc1e7b4c8f9ca457a4a1e9d0cb",
+  "device_id": "ed0bda0dd8c167a73721be5bb142dfc9"
+}

@@ -10,7 +10,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +32,94 @@ from src.services.session_service import get_session_service
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Constants for DRY Code
+# ============================================================================
+
+# Context Types
+class ContextTypes:
+    SEARCH_RESULTS = 'search_results'
+    CART_VIEW = 'cart_view'
+    CART_UPDATED = 'cart_updated'
+    ORDER_CONFIRMED = 'order_confirmed'
+    ORDER_DETAILS = 'order_details'
+    CHECKOUT_QUOTES = 'checkout_quotes'
+    CHECKOUT_FLOW = 'checkout_flow'
+    PAYMENT_STATUS = 'payment_status'
+    ERROR_STATE = 'error_state'
+    SUCCESS_MESSAGE = 'success_message'
+    SESSION_INITIALIZED = 'session_initialized'
+    DATA_RESPONSE = 'data_response'
+    NO_RESULTS = 'no_results'
+    INITIALIZATION_REQUIRED = 'initialization_required'
+
+# MCP Server and Tool Names
+class MCPConstants:
+    SERVER_NAME = 'ondc-shopping'
+    TOOLS = {
+        'SEARCH_PRODUCTS': 'search_products',
+        'ADD_TO_CART': 'add_to_cart',
+        'VIEW_CART': 'view_cart',
+        'REMOVE_FROM_CART': 'remove_from_cart',
+        'UPDATE_CART_QUANTITY': 'update_cart_quantity',
+        'CLEAR_CART': 'clear_cart'
+    }
+
+# Data Field Names
+class DataFields:
+    PRODUCTS = 'products'
+    CART = 'cart'
+    TOTAL_ITEMS = 'total_items'
+    ORDER_ID = 'order_id'
+    ORDER_DETAILS = 'order_details'
+    QUOTE_DATA = 'quote_data'
+    QUOTES = 'quotes'
+    DELIVERY = 'delivery'
+    PAYMENT_ID = 'payment_id'
+    PAYMENT_STATUS = 'payment_status'
+    TRANSACTION_ID = 'transaction_id'
+    ERROR = 'error'
+    ERRORS = 'errors'
+    SUCCESS = 'success'
+    SESSION_ID = 'session_id'
+    DEVICE_ID = 'device_id'
+    USER_ID = 'user_id'
+    NEXT_STEP = 'next_step'
+    STAGE = 'stage'
+    ITEM_ADDED = 'item_added'
+    PRODUCT = 'product'
+    STRUCTURED_DATA = '_structured_data'
+    CONTEXT_TYPE = '_context_type'
+
+# Initialization Keywords
+class InitializationKeywords:
+    KEYWORDS = [
+        "initialize_shopping", "initialize", "start shopping", "begin shopping",
+        "setup session", "create session", "userId", "deviceId"
+    ]
+
+# Heavy Fields to Remove
+class HeavyFields:
+    FIELDS = ['_raw', 'detailed_info', 'full_ondc_data']
+    PREFIXES = ['_raw']
+
+# Validation Messages
+class ValidationMessages:
+    INITIALIZATION_REQUIRED = (
+        "🚨 **Session Initialization Required**\n\n"
+        "Before you can start shopping, you must initialize your session with your Himira credentials:\n\n"
+        "**Call:** `initialize_shopping(userId='your_user_id', deviceId='your_device_id')`\n\n"
+        "**How to get credentials:**\n"
+        "• Log into your Himira frontend\n"
+        "• Open browser Developer Tools (F12)\n" 
+        "• Check localStorage for userId and deviceId\n\n"
+        "**Why required:**\n"
+        "• Access your existing cart and order history\n"
+        "• Proper session isolation between users\n"
+        "• Full ONDC shopping functionality\n\n"
+        "Please provide your credentials to start shopping!"
+    )
 
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)
@@ -55,99 +143,112 @@ def generate_session_id() -> str:
     """Generate a unique session ID."""
     return f"session_{uuid.uuid4().hex}"
 
+def extract_essential_product_fields(product: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract essential fields from a single product"""
+    filtered_product = {
+        # Essential item fields
+        'id': product.get('id'),
+        'local_id': product.get('local_id'),
+        'name': product.get('name'),
+        'description': product.get('description'),
+        'price': product.get('price'),
+        'category': product.get('category'),
+        
+        # Provider info (essential fields only)
+        'provider': {
+            'id': product.get('provider', {}).get('id'),
+            'local_id': product.get('provider', {}).get('local_id'),
+            'name': product.get('provider', {}).get('name')
+        } if product.get('provider') else None,
+        
+        # Location/serviceability
+        'location': {
+            'id': product.get('location', {}).get('id'),
+            'local_id': product.get('location', {}).get('local_id'),
+            'serviceability': product.get('location', {}).get('serviceability')
+        } if product.get('location') else None,
+        
+        # Essential metadata
+        'images': product.get('images'),
+        'stock_availability': product.get('stock_availability'),
+        'availability_status': product.get('availability_status'),
+        'rating': product.get('rating')
+    }
+    return filtered_product
+
+def remove_none_values(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove None values from dictionary recursively"""
+    if not isinstance(data, dict):
+        return data
+        
+    cleaned = {k: v for k, v in data.items() if v is not None}
+    
+    # Clean nested dictionaries
+    for key, value in cleaned.items():
+        if isinstance(value, dict):
+            cleaned[key] = {k: v for k, v in value.items() if v is not None}
+            # Remove empty nested dictionaries
+            if not cleaned[key]:
+                cleaned[key] = None
+    
+    # Remove keys that became None after cleaning
+    return {k: v for k, v in cleaned.items() if v is not None}
+
+def remove_heavy_fields(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove heavy/bloat fields from data"""
+    if not isinstance(data, dict):
+        return data
+        
+    # Define heavy fields to remove
+    heavy_fields = HeavyFields.FIELDS
+    
+    filtered_data = {}
+    for key, value in data.items():
+        # Skip fields that start with heavy prefixes or are in heavy_fields list
+        if any(key.startswith(prefix) for prefix in HeavyFields.PREFIXES) or key in heavy_fields:
+            continue
+        filtered_data[key] = value
+    
+    return filtered_data
+
 def extract_minimal_product_info(data: Dict[str, Any]) -> Dict[str, Any]:
     """Extract only essential product fields for frontend rendering, removing data bloat"""
     if not isinstance(data, dict):
         return data
     
     # If this is a products array, filter each product
-    if 'products' in data and isinstance(data['products'], list):
+    if DataFields.PRODUCTS in data and isinstance(data[DataFields.PRODUCTS], list):
         filtered_data = data.copy()
         filtered_products = []
         
-        for product in data['products']:
+        for product in data[DataFields.PRODUCTS]:
             if isinstance(product, dict):
-                filtered_product = {
-                    # Essential item fields
-                    'id': product.get('id'),
-                    'local_id': product.get('local_id'),
-                    'name': product.get('name'),
-                    'description': product.get('description'),
-                    'price': product.get('price'),
-                    'category': product.get('category'),
-                    
-                    # Provider info (essential fields only)
-                    'provider': {
-                        'id': product.get('provider', {}).get('id'),
-                        'local_id': product.get('provider', {}).get('local_id'),
-                        'name': product.get('provider', {}).get('name')
-                    } if product.get('provider') else None,
-                    
-                    # Location/serviceability
-                    'location': {
-                        'id': product.get('location', {}).get('id'),
-                        'local_id': product.get('location', {}).get('local_id'),
-                        'serviceability': product.get('location', {}).get('serviceability')
-                    } if product.get('location') else None,
-                    
-                    # Essential metadata
-                    'images': product.get('images'),
-                    'stock_availability': product.get('stock_availability'),
-                    'availability_status': product.get('availability_status'),
-                    'rating': product.get('rating')
-                }
-                
-                # Remove None values to keep response clean
-                filtered_product = {k: v for k, v in filtered_product.items() if v is not None}
-                if filtered_product.get('provider'):
-                    filtered_product['provider'] = {k: v for k, v in filtered_product['provider'].items() if v is not None}
-                if filtered_product.get('location'):
-                    filtered_product['location'] = {k: v for k, v in filtered_product['location'].items() if v is not None}
-                    
-                filtered_products.append(filtered_product)
+                # Extract essential fields and clean up None values
+                filtered_product = extract_essential_product_fields(product)
+                cleaned_product = remove_none_values(filtered_product)
+                filtered_products.append(cleaned_product)
         
-        filtered_data['products'] = filtered_products
+        filtered_data[DataFields.PRODUCTS] = filtered_products
         
-        # Keep other top-level fields but remove heavy ones
-        for key in list(filtered_data.keys()):
-            if key.startswith('_raw') or key in ['detailed_info', 'full_ondc_data']:
-                del filtered_data[key]
+        # Remove heavy fields from top-level data
+        filtered_data = remove_heavy_fields(filtered_data)
         
-        logger.info(f"[Product Filter] Filtered {len(data['products'])} products, "
-                   f"reduced from {len(str(data))} to {len(str(filtered_data))} chars")
+        log_performance("Product Filter", {
+            "count": len(data[DataFields.PRODUCTS]),
+            "original_size": len(str(data)),
+            "final_size": len(str(filtered_data)),
+            "size_reduction": True
+        })
         return filtered_data
     
     # For non-product data, just remove heavy fields
-    if isinstance(data, dict):
-        filtered_data = {k: v for k, v in data.items() 
-                        if not k.startswith('_raw') and k not in ['detailed_info', 'full_ondc_data']}
-        return filtered_data
-    
-    return data
+    return remove_heavy_fields(data)
 
 def capture_tool_result_for_session(session_id: str, tool_name: str, tool_result: Any):
     """Capture tool result for later use in API response"""
     try:
         # Extract actual content from CallToolResult if needed
-        actual_result = tool_result
-        
-        # Handle mcp.types.CallToolResult objects
-        if hasattr(tool_result, 'content') and tool_result.content:
-            try:
-                # Try to parse the content as JSON
-                if isinstance(tool_result.content, list) and len(tool_result.content) > 0:
-                    # Get the first content item
-                    content_item = tool_result.content[0]
-                    if hasattr(content_item, 'text'):
-                        actual_result = json.loads(content_item.text)
-                        logger.info(f"[Tool Capture] Extracted content from CallToolResult for {tool_name}")
-                elif hasattr(tool_result.content, 'text'):
-                    actual_result = json.loads(tool_result.content.text)
-                    logger.info(f"[Tool Capture] Extracted text content from CallToolResult for {tool_name}")
-            except (json.JSONDecodeError, AttributeError) as e:
-                logger.warning(f"[Tool Capture] Failed to parse CallToolResult content: {e}")
-                # Fallback to original result
-                actual_result = tool_result
+        actual_result = extract_content_from_call_tool_result(tool_result)
         
         # Store the processed result
         tool_results_cache[session_id] = {
@@ -156,14 +257,17 @@ def capture_tool_result_for_session(session_id: str, tool_name: str, tool_result
             'timestamp': datetime.now()
         }
         
-        # Debug: Log the structure of captured tool result
+        # Standardized logging for tool capture
         if isinstance(actual_result, dict):
-            logger.info(f"[Tool Capture] Captured {tool_name} with keys: {list(actual_result.keys())}")
-            if 'products' in actual_result:
-                product_count = len(actual_result['products']) if isinstance(actual_result['products'], list) else 0
-                logger.info(f"[Tool Capture] Found {product_count} products in result")
+            details = {
+                'keys': list(actual_result.keys()),
+                'content_extracted': actual_result != tool_result
+            }
+            if DataFields.PRODUCTS in actual_result:
+                details['product_count'] = len(actual_result[DataFields.PRODUCTS]) if isinstance(actual_result[DataFields.PRODUCTS], list) else 0
+            log_tool_capture(tool_name, "dict", details)
         else:
-            logger.info(f"[Tool Capture] Captured {tool_name} result type: {type(actual_result)}")
+            log_tool_capture(tool_name, str(type(actual_result)))
             
     except Exception as e:
         logger.warning(f"[Tool Capture] Failed to capture tool result: {e}")
@@ -171,6 +275,145 @@ def capture_tool_result_for_session(session_id: str, tool_name: str, tool_result
 def get_captured_tool_result(session_id: str) -> Optional[Dict[str, Any]]:
     """Get the last captured tool result for a session"""
     return tool_results_cache.get(session_id)
+
+def extract_content_from_call_tool_result(tool_result: Any) -> Any:
+    """
+    Extract actual content from CallToolResult objects.
+    
+    Args:
+        tool_result: Raw tool result which may be a CallToolResult object
+        
+    Returns:
+        Parsed content or original result if parsing fails
+    """
+    # Handle mcp.types.CallToolResult objects
+    if hasattr(tool_result, 'content') and tool_result.content:
+        try:
+            # Try to parse the content as JSON
+            if isinstance(tool_result.content, list) and len(tool_result.content) > 0:
+                # Get the first content item
+                content_item = tool_result.content[0]
+                if hasattr(content_item, 'text'):
+                    return json.loads(content_item.text)
+            elif hasattr(tool_result.content, 'text'):
+                return json.loads(tool_result.content.text)
+        except (json.JSONDecodeError, AttributeError) as e:
+            logger.warning(f"[CallToolResult] Failed to parse content: {e}")
+    
+    # Return original result if no special processing needed
+    return tool_result
+
+def process_tool_result_for_structured_data(tool_result: Dict[str, Any], source: str = "unknown") -> tuple[Optional[Dict[str, Any]], Optional[str], bool]:
+    """
+    Unified tool result processing for both function_response and captured results.
+    
+    Args:
+        tool_result: The tool result dictionary to process
+        source: Source of the tool result for logging ("function_response" or "captured")
+        
+    Returns:
+        tuple: (structured_data, context_type, action_required)
+    """
+    if not isinstance(tool_result, dict):
+        log_data_extraction("Tool result validation", source, False, {"error": f"Not dict: {type(tool_result)}"})
+        return None, None, False
+    
+    structured_data = None
+    context_type = None
+    action_required = False
+    
+    # Check for products array (search results)
+    if DataFields.PRODUCTS in tool_result and tool_result[DataFields.PRODUCTS]:
+        structured_data = tool_result
+        context_type = ContextTypes.SEARCH_RESULTS
+        log_data_extraction("Product extraction", source, True, {"context_type": context_type})
+    
+    # Check for cart data
+    elif DataFields.CART in tool_result or DataFields.TOTAL_ITEMS in tool_result:
+        structured_data = tool_result
+        context_type = ContextTypes.CART_VIEW
+        log_data_extraction("Cart extraction", source, True, {"context_type": context_type})
+    
+    # Fallback to legacy context detection
+    else:
+        structured_data = tool_result
+        context_type, action_required = determine_context_type(tool_result)
+        log_data_extraction("Context detection", source, True, {"context_type": context_type})
+    
+    return structured_data, context_type, action_required
+
+def log_tool_capture(tool_name: str, result_type: str, details: Dict[str, Any] = None):
+    """Standardized logging for tool capture operations"""
+    if details:
+        if 'keys' in details:
+            logger.info(f"[Tool Capture] Captured {tool_name} with keys: {details['keys']}")
+        if 'product_count' in details:
+            logger.info(f"[Tool Capture] Found {details['product_count']} products in result")
+        if 'content_extracted' in details and details['content_extracted']:
+            logger.info(f"[Tool Capture] Extracted content from CallToolResult for {tool_name}")
+    else:
+        logger.info(f"[Tool Capture] Captured {tool_name} result type: {result_type}")
+
+def log_data_extraction(operation: str, source: str, success: bool, details: Dict[str, Any] = None):
+    """Standardized logging for data extraction operations"""
+    status = "✅" if success else "❌"
+    base_msg = f"[Data Processing] {status} {operation} from {source}"
+    
+    if details:
+        if 'context_type' in details:
+            logger.info(f"{base_msg}: {details['context_type']}")
+        elif 'size_reduction' in details:
+            logger.info(f"{base_msg} - {details['size_reduction']}")
+        else:
+            logger.info(base_msg)
+    else:
+        logger.info(base_msg)
+
+def log_performance(operation: str, metrics: Dict[str, Any]):
+    """Standardized logging for performance metrics"""
+    if 'size_reduction' in metrics:
+        original_size = metrics.get('original_size', 0)
+        final_size = metrics.get('final_size', 0)
+        count = metrics.get('count', 0)
+        logger.info(f"[{operation}] Filtered {count} items, "
+                   f"reduced from {original_size} to {final_size} chars")
+    elif 'execution_time' in metrics:
+        logger.info(f"[{operation}] Completed in {metrics['execution_time']}ms")
+
+@contextmanager
+def session_context_file(session_id: str):
+    """
+    Context manager for session context file lifecycle.
+    Ensures proper setup and guaranteed cleanup of session context file.
+    
+    Args:
+        session_id: The session ID to write to the context file
+    """
+    context_file = None
+    try:
+        # Create session context file that MCP server can read
+        context_dir = os.path.expanduser("~/.ondc-mcp")
+        os.makedirs(context_dir, exist_ok=True)
+        context_file = os.path.join(context_dir, "chat_session_context.txt")
+        
+        with open(context_file, 'w') as f:
+            f.write(session_id)
+        
+        logger.info("Set MCP session context file: %s", session_id)
+        yield context_file
+        
+    except Exception as e:
+        logger.warning("Failed to set MCP session context file: %s", e)
+        yield None
+        
+    finally:
+        # Guaranteed cleanup
+        if context_file and os.path.exists(context_file):
+            try:
+                os.remove(context_file)
+                logger.debug("Cleaned up MCP session context file")
+            except Exception as cleanup_error:
+                logger.debug("Session context file cleanup failed: %s", cleanup_error)
 
 
 def check_agent_ready():
@@ -207,29 +450,12 @@ def is_session_initialized(session_id: str) -> bool:
 
 def is_initialization_request(message: str) -> bool:
     """Check if the message is requesting initialization"""
-    initialization_keywords = [
-        "initialize_shopping", "initialize", "start shopping", "begin shopping",
-        "setup session", "create session", "userId", "deviceId"
-    ]
     message_lower = message.lower()
-    return any(keyword in message_lower for keyword in initialization_keywords)
+    return any(keyword in message_lower for keyword in InitializationKeywords.KEYWORDS)
 
 def get_initialization_required_response() -> str:
     """Get the standard response for initialization requirement"""
-    return (
-        "🚨 **Session Initialization Required**\n\n"
-        "Before you can start shopping, you must initialize your session with your Himira credentials:\n\n"
-        "**Call:** `initialize_shopping(userId='your_user_id', deviceId='your_device_id')`\n\n"
-        "**How to get credentials:**\n"
-        "• Log into your Himira frontend\n"
-        "• Open browser Developer Tools (F12)\n" 
-        "• Check localStorage for userId and deviceId\n\n"
-        "**Why required:**\n"
-        "• Access your existing cart and order history\n"
-        "• Proper session isolation between users\n"
-        "• Full ONDC shopping functionality\n\n"
-        "Please provide your credentials to start shopping!"
-    )
+    return ValidationMessages.INITIALIZATION_REQUIRED
 
 def determine_context_type(tool_result: Dict[str, Any]) -> tuple[str, bool]:
     """Determine context type and action requirement from tool result.
@@ -245,52 +471,52 @@ def determine_context_type(tool_result: Dict[str, Any]) -> tuple[str, bool]:
     # 🚀 ENHANCED: Granular context detection
     
     # Product search results
-    if 'products' in tool_result:
-        products = tool_result['products']
+    if DataFields.PRODUCTS in tool_result:
+        products = tool_result[DataFields.PRODUCTS]
         if products and len(products) > 0:
-            return 'search_results', False
+            return ContextTypes.SEARCH_RESULTS, False
         else:
-            return 'no_results', False
+            return ContextTypes.NO_RESULTS, False
     
     # Cart operations - differentiate between view and update
-    if 'cart' in tool_result or 'cart_summary' in tool_result:
-        return 'cart_view', False
+    if DataFields.CART in tool_result or 'cart_summary' in tool_result:
+        return ContextTypes.CART_VIEW, False
     
     # Single item operations (add to cart)
-    if 'item_added' in tool_result or 'product' in tool_result:
-        return 'cart_updated', False
+    if DataFields.ITEM_ADDED in tool_result or DataFields.PRODUCT in tool_result:
+        return ContextTypes.CART_UPDATED, False
     
     # Order operations - differentiate between confirmed and details
-    if 'order_id' in tool_result:
-        return 'order_confirmed', False
-    elif 'order_details' in tool_result:
-        return 'order_details', False
+    if DataFields.ORDER_ID in tool_result:
+        return ContextTypes.ORDER_CONFIRMED, False
+    elif DataFields.ORDER_DETAILS in tool_result:
+        return ContextTypes.ORDER_DETAILS, False
     
     # Checkout flow - differentiate stages
-    if 'quote_data' in tool_result or 'quotes' in tool_result or 'delivery' in tool_result:
-        return 'checkout_quotes', True
-    elif 'next_step' in tool_result or 'stage' in tool_result:
-        return 'checkout_flow', True
+    if DataFields.QUOTE_DATA in tool_result or DataFields.QUOTES in tool_result or DataFields.DELIVERY in tool_result:
+        return ContextTypes.CHECKOUT_QUOTES, True
+    elif DataFields.NEXT_STEP in tool_result or DataFields.STAGE in tool_result:
+        return ContextTypes.CHECKOUT_FLOW, True
     
     # Payment operations
-    if any(key in tool_result for key in ['payment_id', 'payment_status', 'transaction_id']):
-        return 'payment_status', False
+    if any(key in tool_result for key in [DataFields.PAYMENT_ID, DataFields.PAYMENT_STATUS, DataFields.TRANSACTION_ID]):
+        return ContextTypes.PAYMENT_STATUS, False
     
     # Error states
-    if 'error' in tool_result or 'errors' in tool_result:
-        return 'error_state', False
+    if DataFields.ERROR in tool_result or DataFields.ERRORS in tool_result:
+        return ContextTypes.ERROR_STATE, False
     
     # Success messages
-    if 'success' in tool_result and tool_result.get('success') is True:
-        return 'success_message', False
+    if DataFields.SUCCESS in tool_result and tool_result.get(DataFields.SUCCESS) is True:
+        return ContextTypes.SUCCESS_MESSAGE, False
     
     # Session/initialization responses
-    if 'session_id' in tool_result and 'device_id' in tool_result:
-        return 'session_initialized', False
+    if DataFields.SESSION_ID in tool_result and DataFields.DEVICE_ID in tool_result:
+        return ContextTypes.SESSION_INITIALIZED, False
     
     # Default fallback for any data
     if tool_result:
-        return 'data_response', False
+        return ContextTypes.DATA_RESPONSE, False
     
     return None, False
 
@@ -381,7 +607,7 @@ CRITICAL RULES:
 - Use session_id in ALL tool calls after initialization
 
 Always enforce mandatory initialization before any shopping operations.""",
-                server_names=["ondc-shopping"]  # Connects to our MCP server
+                server_names=[MCPConstants.SERVER_NAME]  # Connects to our MCP server
             )
             
             await agent.__aenter__()
@@ -624,7 +850,7 @@ async def chat(request: Request, chat_req: ChatRequest):
                 device_id="",   # No device until initialized
                 timestamp=datetime.now(),
                 data=None,
-                context_type="initialization_required",
+                context_type=ContextTypes.INITIALIZATION_REQUIRED,
                 action_required=True
             )
     else:
@@ -640,7 +866,7 @@ async def chat(request: Request, chat_req: ChatRequest):
                     device_id=chat_req.device_id or "",
                     timestamp=datetime.now(),
                     data=None,
-                    context_type="initialization_required", 
+                    context_type=ContextTypes.INITIALIZATION_REQUIRED, 
                     action_required=True
                 )
     
@@ -659,21 +885,6 @@ async def chat(request: Request, chat_req: ChatRequest):
         # CRITICAL: Set file-based session context for MCP tools
         # This ensures all MCP tool calls use the correct chat API session
         # Uses file-based approach since MCP server runs in separate process
-        try:
-            # Create session context file that MCP server can read
-            context_dir = os.path.expanduser("~/.ondc-mcp")
-            os.makedirs(context_dir, exist_ok=True)
-            context_file = os.path.join(context_dir, "chat_session_context.txt")
-            
-            with open(context_file, 'w') as f:
-                f.write(session_id)
-            
-            logger.info("Set MCP session context file: %s", session_id)
-        except Exception as e:
-            logger.warning("Failed to set MCP session context file: %s", e)
-        
-        # Session context is managed via file-based approach for MCP tools
-        
         # Get session-specific LLM with conversation history
         session_llm = await get_session_llm(session_id)
         
@@ -712,16 +923,18 @@ async def chat(request: Request, chat_req: ChatRequest):
             # Temporarily replace the method
             agent.call_tool = capturing_call_tool
         
-        try:
-            # Get AI response using full conversation loop
-            contents = await session_llm.generate(
-                message=enhanced_message,
-                request_params=request_params
-            )
-        finally:
-            # Restore original method
-            if original_call_tool:
-                agent.call_tool = original_call_tool
+        # Use context manager for LLM generation that requires MCP tools
+        with session_context_file(session_id):
+            try:
+                # Get AI response using full conversation loop
+                contents = await session_llm.generate(
+                    message=enhanced_message,
+                    request_params=request_params
+                )
+            finally:
+                # Restore original method
+                if original_call_tool:
+                    agent.call_tool = original_call_tool
         
         # Process the response using proper MCP integration
         response_text = ""
@@ -753,35 +966,23 @@ async def chat(request: Request, chat_req: ChatRequest):
                                     logger.debug(f"[Chat API] Parsed tool result with keys: {list(tool_result.keys())}")
                                     
                                     # 🚀 ENHANCED: Extract structured data from MCP response
-                                    if '_structured_data' in tool_result:
-                                        structured_data = tool_result['_structured_data']
-                                        logger.info(f"[Chat API] ✅ Extracted structured data keys: {list(structured_data.keys()) if structured_data else 'None'}")
+                                    if DataFields.STRUCTURED_DATA in tool_result:
+                                        structured_data = tool_result[DataFields.STRUCTURED_DATA]
+                                        log_data_extraction("MCP structured data", "function_response", True, 
+                                                          {"keys": list(structured_data.keys()) if structured_data else None})
                                     
                                     # 🚀 ENHANCED: Extract context type from MCP response
-                                    if '_context_type' in tool_result:
-                                        context_type = tool_result['_context_type']
-                                        logger.info(f"[Chat API] ✅ Extracted context type: {context_type}")
+                                    if DataFields.CONTEXT_TYPE in tool_result:
+                                        context_type = tool_result[DataFields.CONTEXT_TYPE]
+                                        log_data_extraction("MCP context type", "function_response", True, 
+                                                          {"context_type": context_type})
                                     
                                     
                                     # Extract structured data directly from tool result
                                     if not structured_data:
-                                        # Check for products array (search results)
-                                        if 'products' in tool_result and tool_result['products']:
-                                            structured_data = tool_result
-                                            context_type = 'search_results'
-                                            logger.info("[Chat API] ✅ Extracted search products data")
-                                        
-                                        # Check for cart data
-                                        elif 'cart' in tool_result or 'total_items' in tool_result:
-                                            structured_data = tool_result
-                                            context_type = 'cart_view'
-                                            logger.info("[Chat API] ✅ Extracted cart data")
-                                        
-                                        # Fallback to legacy context detection
-                                        else:
-                                            structured_data = tool_result
-                                            context_type, action_required = determine_context_type(tool_result)
-                                            logger.info("[Chat API] Using legacy context detection: %s", context_type)
+                                        structured_data, context_type, action_required = process_tool_result_for_structured_data(
+                                            tool_result, source="function_response"
+                                        )
                                     
                                 except (json.JSONDecodeError, AttributeError) as e:
                                     # If not JSON or no content attribute, just add to response text
@@ -805,52 +1006,27 @@ async def chat(request: Request, chat_req: ChatRequest):
                 tool_result = captured_result['result']
                 tool_name = captured_result['tool_name']
                 
-                logger.info(f"[Tool Capture] Using captured result from {tool_name}")
+                log_tool_capture(tool_name, "dict", {"source": "captured_result", "keys": list(tool_result.keys()) if isinstance(tool_result, dict) else None})
                 
                 # Debug: Log the captured result structure
                 if isinstance(tool_result, dict):
-                    logger.info(f"[Tool Capture] Captured result keys: {list(tool_result.keys())}")
-                    logger.info(f"[Tool Capture] Has products: {'products' in tool_result}")
-                    if 'products' in tool_result:
-                        products = tool_result['products']
-                        logger.info(f"[Tool Capture] Products type: {type(products)}, count: {len(products) if isinstance(products, list) else 'not list'}")
+                    details = {"keys": list(tool_result.keys()), "has_products": DataFields.PRODUCTS in tool_result}
+                    if DataFields.PRODUCTS in tool_result:
+                        products = tool_result[DataFields.PRODUCTS]
+                        details["product_count"] = len(products) if isinstance(products, list) else 0
+                        details["products_type"] = str(type(products))
+                    log_tool_capture(f"{tool_name}_structure", "analysis", details)
                 
-                # Apply the same logic as the function_response processing
-                if isinstance(tool_result, dict):
-                    # Check for products array (search results)
-                    if 'products' in tool_result and tool_result['products']:
-                        structured_data = tool_result
-                        context_type = 'search_results'
-                        logger.info("[Tool Capture] ✅ Extracted search products from captured result")
-                    
-                    # Check for cart data  
-                    elif 'cart' in tool_result or 'total_items' in tool_result:
-                        structured_data = tool_result
-                        context_type = 'cart_view'
-                        logger.info("[Tool Capture] ✅ Extracted cart data from captured result")
-                    
-                    # Use general context detection
-                    else:
-                        structured_data = tool_result
-                        context_type, action_required = determine_context_type(tool_result)
-                        logger.info(f"[Tool Capture] Using context detection: {context_type}")
-                else:
-                    logger.warning(f"[Tool Capture] Tool result is not dict: {type(tool_result)}")
+                # Apply unified data processing logic
+                structured_data, context_type, action_required = process_tool_result_for_structured_data(
+                    tool_result, source="captured"
+                )
         
         # Apply minimal product info extraction to reduce data bloat
         if structured_data:
             structured_data = extract_minimal_product_info(structured_data)
-            logger.info("[Chat API] Applied minimal product filtering to structured data")
+            log_performance("Chat API Product Filter", {"operation": "minimal_product_filtering", "applied": True})
         
-        # IMPORTANT: Clean up session context file AFTER LLM response is processed
-        # This ensures MCP tools can access the session during the request
-        try:
-            context_file = os.path.expanduser("~/.ondc-mcp/chat_session_context.txt")
-            if os.path.exists(context_file):
-                os.remove(context_file)
-                logger.debug("Cleaned up MCP session context file after LLM response")
-        except Exception as e:
-            logger.debug("Session context file cleanup failed (not critical): %s", e)
 
         # FIX: Extract actual device_id from session after MCP tool execution
         # This ensures we return the correct device_id that was set by the MCP tool
@@ -893,14 +1069,6 @@ async def chat(request: Request, chat_req: ChatRequest):
         
     except Exception as e:
         logger.error(f"Chat error: {e}")
-        # Clean up session context file on error too
-        try:
-            context_file = os.path.expanduser("~/.ondc-mcp/chat_session_context.txt")
-            if os.path.exists(context_file):
-                os.remove(context_file)
-                logger.debug("Cleaned up MCP session context file on error")
-        except Exception as cleanup_error:
-            logger.debug("Session context file cleanup on error failed: %s", cleanup_error)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Search endpoint
@@ -920,14 +1088,14 @@ async def search_products(request: Request, search_req: SearchRequest):
         # Call search tool directly
         try:
             tool_result = await agent.call_tool(
-                server_name="ondc-shopping",
-                name="search_products",
+                server_name=MCPConstants.SERVER_NAME,
+                name=MCPConstants.TOOLS['SEARCH_PRODUCTS'],
                 arguments={"query": search_req.query}
             )
             
             # Format search results
-            if tool_result and isinstance(tool_result, dict) and 'products' in tool_result:
-                products = tool_result['products']
+            if tool_result and isinstance(tool_result, dict) and DataFields.PRODUCTS in tool_result:
+                products = tool_result[DataFields.PRODUCTS]
                 response = f"Found {len(products)} products:\\n"
                 for i, product in enumerate(products[:10], 1):
                     response += f"{i}. {product.get('name', 'Unknown')} - ₹{product.get('price', 'N/A')}\\n"
@@ -963,19 +1131,19 @@ async def manage_cart(request: Request, device_id: str, cart_req: CartRequest):
         
         # Map cart actions to appropriate tools using if/elif
         if cart_req.action == "add" and cart_req.item:
-            tool_name = "add_to_cart"
+            tool_name = MCPConstants.TOOLS['ADD_TO_CART']
             arguments = {"item": cart_req.item, "quantity": cart_req.quantity}
         elif cart_req.action == "view":
-            tool_name = "view_cart"
+            tool_name = MCPConstants.TOOLS['VIEW_CART']
             arguments = {"device_id": device_id}
         elif cart_req.action == "remove" and cart_req.item:
-            tool_name = "remove_from_cart"
+            tool_name = MCPConstants.TOOLS['REMOVE_FROM_CART']
             arguments = {"item_id": cart_req.item.get("id", "")}
         elif cart_req.action == "update" and cart_req.item:
-            tool_name = "update_cart_quantity"
+            tool_name = MCPConstants.TOOLS['UPDATE_CART_QUANTITY']
             arguments = {"item_id": cart_req.item.get("id", ""), "quantity": cart_req.quantity}
         elif cart_req.action == "clear":
-            tool_name = "clear_cart"
+            tool_name = MCPConstants.TOOLS['CLEAR_CART']
             arguments = {"device_id": device_id}
         else:
             return {
@@ -988,7 +1156,7 @@ async def manage_cart(request: Request, device_id: str, cart_req: CartRequest):
         # Call the appropriate cart tool
         try:
             tool_result = await agent.call_tool(
-                server_name="ondc-shopping",
+                server_name=MCPConstants.SERVER_NAME,
                 name=tool_name,
                 arguments=arguments
             )

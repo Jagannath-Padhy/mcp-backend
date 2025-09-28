@@ -1,0 +1,954 @@
+{
+    "response": "**Your Cart (1 item)**\n\n1. **Kiwi Jam** (from Himira Store)\n   \u20b9299.00 x 1 = \u20b9299.00\n\n**Total Items: 1**\n**Cart Value: \u20b9299.00**\n\nReady to checkout? Use the checkout tools to proceed!",
+    "session_id": "session_62846bbc1e7b4c8f9ca457a4a1e9d0cb",
+    "device_id": "ed0bda0dd8c167a73721be5bb142dfc9",
+    "timestamp": "2025-09-28T14:28:28.745747",
+    "data": {
+        "success": true,
+        "message": " **Your Cart (1 items)**\n\n1. **Kiwi Jam** (from Himira Store)\n   \u20b9299.00 x 1 = \u20b9299.00\n\n**Total Items: 1**\n**Cart Value: \u20b9299.00**\n\n Ready to checkout? Use the checkout tools to proceed!",
+        "session": {
+            "session_id": "session_62846bbc1e7b4c8f9ca457a4a1e9d0cb"
+        },
+        "_debug_force_execution": true,
+        "_operation_id": "394b270f-dbb8-4f35-a85a-9b26b2884cbd",
+        "_fresh_execution_requested": true,
+        "_timestamp": "2025-09-28T14:28:21.797034",
+        "_bypass_cache": true,
+        "cart": {
+            "items": [
+                {
+                    "_id": "68d945c362b0d47d8a40d08b",
+                    "item_type": null,
+                    "cart": "68d945c362b0d47d8a40d089",
+                    "item_id": "f383d5a7-363e-4fbe-949e-dc5800db5608",
+                    "id": "hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_f383d5a7-363e-4fbe-949e-dc5800db5608",
+                    "provider_id": "hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c",
+                    "count": 1,
+                    "customisations": null,
+                    "hasCustomisations": false,
+                    "createdAt": "2025-09-28T14:27:15.438Z",
+                    "updatedAt": "2025-09-28T14:27:15.438Z",
+                    "__v": 0,
+                    "item": {
+                        "id": "hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_f383d5a7-363e-4fbe-949e-dc5800db5608",
+                        "local_id": "f383d5a7-363e-4fbe-949e-dc5800db5608",
+                        "bpp_id": "hp-seller-preprod.himira.co.in",
+                        "bpp_uri": "https://hp-seller-preprod.himira.co.in/api/v2",
+                        "domain": "ONDC:RET10",
+                        "tags": [
+                            {
+                                "code": "origin",
+                                "list": [
+                                    {
+                                        "code": "country",
+                                        "value": "IND"
+                                    }
+                                ]
+                            },
+                            {
+                                "code": "type",
+                                "list": [
+                                    {
+                                        "code": "type",
+                                        "value": "item"
+                                    }
+                                ]
+                            },
+                            {
+                                "code": "image",
+                                "list": [
+                                    {
+                                        "code": "type",
+                                        "value": "back_image"
+                                    },
+                                    {
+                                        "code": "url",
+                                        "value": "https://hp-buyer-cdn-prod.thewitslab.com/Grocery/Kiwi-Jam/3.jpeg"
+                                    }
+                                ]
+                            },
+                            {
+                                "code": "veg_nonveg",
+                                "list": [
+                                    {
+                                        "code": "veg",
+                                        "value": "yes"
+                                    }
+                                ]
+                            }
+                        ],
+                        "contextCity": "std:0172",
+                        "quantity": {
+                            "count": 1
+                        },
+                        "provider": {
+                            "id": "hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c",
+                            "descriptor": {
+                                "name": "Himira Store",
+                                "symbol": "https://storage.googleapis.com/hp-seller-preprod/logo?GoogleAccessId=hp-ondc-sa%40hp-gov.iam.gserviceaccount.com&Expires=2104115225&Signature=6Q7Ulph%2BOoO4%2FNOb0VGC3tJF%2FfMe9jCfIh%2FvBUiiIFtzG3BzI%2BY%2BBdCgQaeqaxWg%2B3%2FCCm6%2Bt15nFHEVpkNl6ZkL9Uu%2BgYJJVzCRAXCCtrG6loG6xf1kZZuy7Ml8JL1JSId8EuQED5dEM1BKAtjTWIxMj7p4tIg5ngARQs%2FkCFQZrwFGOKXajUURDed1Y2MUz1L4gCeKZetlniWM53kIX8J5BQU2ZCTPJ7yLW0tYFLnZto9wNuwVdMTjM%2BseEESkrEiAB1zsDfpeC6IEWTpiPMF2%2B3tJFDQd%2BxcBq6ZMqUm7l8x5gZgaiX7pIi7C4m7lGp3r%2FBuPPwveDmBF%2BZhGXQ%3D%3D",
+                                "short_desc": "Himira Store",
+                                "long_desc": "Himira Store",
+                                "images": [
+                                    "https://storage.googleapis.com/hp-seller-preprod/logo?GoogleAccessId=hp-ondc-sa%40hp-gov.iam.gserviceaccount.com&Expires=2104115225&Signature=6Q7Ulph%2BOoO4%2FNOb0VGC3tJF%2FfMe9jCfIh%2FvBUiiIFtzG3BzI%2BY%2BBdCgQaeqaxWg%2B3%2FCCm6%2Bt15nFHEVpkNl6ZkL9Uu%2BgYJJVzCRAXCCtrG6loG6xf1kZZuy7Ml8JL1JSId8EuQED5dEM1BKAtjTWIxMj7p4tIg5ngARQs%2FkCFQZrwFGOKXajUURDed1Y2MUz1L4gCeKZetlniWM53kIX8J5BQU2ZCTPJ7yLW0tYFLnZto9wNuwVdMTjM%2BseEESkrEiAB1zsDfpeC6IEWTpiPMF2%2B3tJFDQd%2BxcBq6ZMqUm7l8x5gZgaiX7pIi7C4m7lGp3r%2FBuPPwveDmBF%2BZhGXQ%3D%3D"
+                                ]
+                            },
+                            "time": {
+                                "label": "enable",
+                                "timestamp": "2025-09-11T13:25:55.474Z"
+                            },
+                            "@ondc/org/fssai_license_no": "12345678901234",
+                            "ttl": "PT24H",
+                            "fulfillments": [
+                                {
+                                    "id": "1",
+                                    "type": "Delivery",
+                                    "contact": {
+                                        "email": "naman.pawar@thewitslab.com",
+                                        "phone": "7505390422"
+                                    }
+                                }
+                            ],
+                            "tags": [
+                                {
+                                    "code": "serviceability",
+                                    "list": [
+                                        {
+                                            "code": "location",
+                                            "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                        },
+                                        {
+                                            "code": "category",
+                                            "value": "Tinned and Processed Food"
+                                        },
+                                        {
+                                            "code": "type",
+                                            "value": "12"
+                                        },
+                                        {
+                                            "code": "unit",
+                                            "value": "country"
+                                        },
+                                        {
+                                            "code": "val",
+                                            "value": "IND"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "code": "serviceability",
+                                    "list": [
+                                        {
+                                            "code": "location",
+                                            "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                        },
+                                        {
+                                            "code": "category",
+                                            "value": "Salt, Sugar and Jaggery"
+                                        },
+                                        {
+                                            "code": "type",
+                                            "value": "12"
+                                        },
+                                        {
+                                            "code": "unit",
+                                            "value": "country"
+                                        },
+                                        {
+                                            "code": "val",
+                                            "value": "IND"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "code": "serviceability",
+                                    "list": [
+                                        {
+                                            "code": "location",
+                                            "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                        },
+                                        {
+                                            "code": "category",
+                                            "value": "Oil & Ghee"
+                                        },
+                                        {
+                                            "code": "type",
+                                            "value": "12"
+                                        },
+                                        {
+                                            "code": "unit",
+                                            "value": "country"
+                                        },
+                                        {
+                                            "code": "val",
+                                            "value": "IND"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "code": "serviceability",
+                                    "list": [
+                                        {
+                                            "code": "location",
+                                            "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                        },
+                                        {
+                                            "code": "category",
+                                            "value": "Pickles and Chutney"
+                                        },
+                                        {
+                                            "code": "type",
+                                            "value": "12"
+                                        },
+                                        {
+                                            "code": "unit",
+                                            "value": "country"
+                                        },
+                                        {
+                                            "code": "val",
+                                            "value": "IND"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "code": "serviceability",
+                                    "list": [
+                                        {
+                                            "code": "location",
+                                            "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                        },
+                                        {
+                                            "code": "category",
+                                            "value": "Frozen Vegetables"
+                                        },
+                                        {
+                                            "code": "type",
+                                            "value": "12"
+                                        },
+                                        {
+                                            "code": "unit",
+                                            "value": "country"
+                                        },
+                                        {
+                                            "code": "val",
+                                            "value": "IND"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "code": "serviceability",
+                                    "list": [
+                                        {
+                                            "code": "location",
+                                            "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                        },
+                                        {
+                                            "code": "category",
+                                            "value": "Masala & Seasoning"
+                                        },
+                                        {
+                                            "code": "type",
+                                            "value": "12"
+                                        },
+                                        {
+                                            "code": "unit",
+                                            "value": "country"
+                                        },
+                                        {
+                                            "code": "val",
+                                            "value": "IND"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "code": "serviceability",
+                                    "list": [
+                                        {
+                                            "code": "location",
+                                            "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                        },
+                                        {
+                                            "code": "category",
+                                            "value": "Fruits and Vegetables"
+                                        },
+                                        {
+                                            "code": "type",
+                                            "value": "12"
+                                        },
+                                        {
+                                            "code": "unit",
+                                            "value": "country"
+                                        },
+                                        {
+                                            "code": "val",
+                                            "value": "IND"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "code": "timing",
+                                    "list": [
+                                        {
+                                            "code": "type",
+                                            "value": "All"
+                                        },
+                                        {
+                                            "code": "location",
+                                            "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                        },
+                                        {
+                                            "code": "day_from",
+                                            "value": "1"
+                                        },
+                                        {
+                                            "code": "day_to",
+                                            "value": "7"
+                                        },
+                                        {
+                                            "code": "time_from",
+                                            "value": "0000"
+                                        },
+                                        {
+                                            "code": "time_to",
+                                            "value": "2359"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "local_id": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c",
+                            "slug": "Himira-Store-4c6840",
+                            "locations": [
+                                {
+                                    "id": "hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_d871c2ae-bf3f-4d3c-963f-f85f94848e8c",
+                                    "gps": "0,0",
+                                    "address": {
+                                        "city": "Mohali",
+                                        "state": "Punjab",
+                                        "area_code": "140301",
+                                        "street": "Eco Floors 1",
+                                        "locality": "Sector 125"
+                                    },
+                                    "time": {
+                                        "label": "enable",
+                                        "timestamp": "2025-09-11T13:25:55.474Z",
+                                        "days": "1,2,3,4,5,6,7",
+                                        "schedule": {
+                                            "holidays": [
+                                                "2027-10-23"
+                                            ]
+                                        },
+                                        "range": {
+                                            "start": "0000",
+                                            "end": "2359"
+                                        }
+                                    },
+                                    "circle": {
+                                        "gps": "0,0",
+                                        "radius": {
+                                            "unit": "km",
+                                            "value": "3"
+                                        }
+                                    },
+                                    "local_id": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                }
+                            ]
+                        },
+                        "product": {
+                            "id": "f383d5a7-363e-4fbe-949e-dc5800db5608",
+                            "time": {
+                                "label": "enable",
+                                "timestamp": "2025-07-16T11:30:20.784Z"
+                            },
+                            "parent_item_id": "",
+                            "descriptor": {
+                                "name": "Kiwi Jam",
+                                "code": "1:4000",
+                                "symbol": "https://hp-buyer-cdn-prod.thewitslab.com/Grocery/Kiwi-Jam/1.jpeg",
+                                "short_desc": "There are no chemical preservatives, no artificial colours or flavours are added in the Jam.",
+                                "long_desc": "We make very low-sugar, tasty, healthy and fresh fruit spreads, so that you experience the natural flavour of fruit. Our jams are 80% fruit by weight, so in every spoonful you also consume a healthy portion of condensed fruit.",
+                                "images": [
+                                    "https://hp-buyer-cdn-prod.thewitslab.com/Grocery/Kiwi-Jam/1.jpeg",
+                                    "https://hp-buyer-cdn-prod.thewitslab.com/Grocery/Kiwi-Jam/2.jpeg",
+                                    "https://hp-buyer-cdn-prod.thewitslab.com/Grocery/Kiwi-Jam/3.jpeg"
+                                ]
+                            },
+                            "quantity": {
+                                "unitized": {
+                                    "measure": {
+                                        "unit": "gram",
+                                        "value": "250"
+                                    }
+                                },
+                                "available": {
+                                    "count": "99"
+                                },
+                                "maximum": {
+                                    "count": "5"
+                                }
+                            },
+                            "price": {
+                                "currency": "INR",
+                                "value": 299,
+                                "maximum_value": "565"
+                            },
+                            "category_ids": [],
+                            "category_id": "Tinned and Processed Food",
+                            "location_id": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c",
+                            "fulfillment_id": "1",
+                            "@ondc/org/returnable": true,
+                            "@ondc/org/cancellable": true,
+                            "@ondc/org/available_on_cod": false,
+                            "@ondc/org/time_to_ship": "P0D",
+                            "@ondc/org/seller_pickup_return": true,
+                            "@ondc/org/return_window": "PT168H",
+                            "@ondc/org/contact_details_consumer_care": "Himira Store,pawarnaman11@gmail.com,9816012233",
+                            "@ondc/org/statutory_reqs_packaged_commodities": {
+                                "manufacturer_or_packer_name": "Ever Green Self Help Group",
+                                "manufacturer_or_packer_address": "Village-Pamlahi, Post Office-Thanedhar, Tehsil-Kumarsain,District-Shimla, Pin- 172030Himachal Pradesh",
+                                "common_or_generic_name_of_commodity": "Jams",
+                                "month_year_of_manufacture_packing_import": "06/2024"
+                            },
+                            "@ondc/org/statutory_reqs_prepackaged_food": {
+                                "nutritional_info": "NA",
+                                "additives_info": "NA",
+                                "brand_owner_FSSAI_license_no": "NA",
+                                "other_FSSAI_license_no": "NA",
+                                "importer_FSSAI_license_no": "NA"
+                            },
+                            "tags": [
+                                {
+                                    "code": "origin",
+                                    "list": [
+                                        {
+                                            "code": "country",
+                                            "value": "IND"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "code": "type",
+                                    "list": [
+                                        {
+                                            "code": "type",
+                                            "value": "item"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "code": "image",
+                                    "list": [
+                                        {
+                                            "code": "type",
+                                            "value": "back_image"
+                                        },
+                                        {
+                                            "code": "url",
+                                            "value": "https://hp-buyer-cdn-prod.thewitslab.com/Grocery/Kiwi-Jam/3.jpeg"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "code": "veg_nonveg",
+                                    "list": [
+                                        {
+                                            "code": "veg",
+                                            "value": "yes"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "slug": "Kiwi-Jam-5adcb8",
+                            "subtotal": 299
+                        },
+                        "userId": "",
+                        "deviceId": "",
+                        "customisationState": {},
+                        "customisations": null,
+                        "hasCustomisations": false,
+                        "attributes": {},
+                        "related_items": 0
+                    }
+                }
+            ],
+            "total_items": 1,
+            "total_value": 299.0,
+            "is_empty": false
+        },
+        "_structured_data": {
+            "cart": {
+                "items": [
+                    {
+                        "_id": "68d945c362b0d47d8a40d08b",
+                        "item_type": null,
+                        "cart": "68d945c362b0d47d8a40d089",
+                        "item_id": "f383d5a7-363e-4fbe-949e-dc5800db5608",
+                        "id": "hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_f383d5a7-363e-4fbe-949e-dc5800db5608",
+                        "provider_id": "hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c",
+                        "count": 1,
+                        "customisations": null,
+                        "hasCustomisations": false,
+                        "createdAt": "2025-09-28T14:27:15.438Z",
+                        "updatedAt": "2025-09-28T14:27:15.438Z",
+                        "__v": 0,
+                        "item": {
+                            "id": "hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_f383d5a7-363e-4fbe-949e-dc5800db5608",
+                            "local_id": "f383d5a7-363e-4fbe-949e-dc5800db5608",
+                            "bpp_id": "hp-seller-preprod.himira.co.in",
+                            "bpp_uri": "https://hp-seller-preprod.himira.co.in/api/v2",
+                            "domain": "ONDC:RET10",
+                            "tags": [
+                                {
+                                    "code": "origin",
+                                    "list": [
+                                        {
+                                            "code": "country",
+                                            "value": "IND"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "code": "type",
+                                    "list": [
+                                        {
+                                            "code": "type",
+                                            "value": "item"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "code": "image",
+                                    "list": [
+                                        {
+                                            "code": "type",
+                                            "value": "back_image"
+                                        },
+                                        {
+                                            "code": "url",
+                                            "value": "https://hp-buyer-cdn-prod.thewitslab.com/Grocery/Kiwi-Jam/3.jpeg"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "code": "veg_nonveg",
+                                    "list": [
+                                        {
+                                            "code": "veg",
+                                            "value": "yes"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "contextCity": "std:0172",
+                            "quantity": {
+                                "count": 1
+                            },
+                            "provider": {
+                                "id": "hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c",
+                                "descriptor": {
+                                    "name": "Himira Store",
+                                    "symbol": "https://storage.googleapis.com/hp-seller-preprod/logo?GoogleAccessId=hp-ondc-sa%40hp-gov.iam.gserviceaccount.com&Expires=2104115225&Signature=6Q7Ulph%2BOoO4%2FNOb0VGC3tJF%2FfMe9jCfIh%2FvBUiiIFtzG3BzI%2BY%2BBdCgQaeqaxWg%2B3%2FCCm6%2Bt15nFHEVpkNl6ZkL9Uu%2BgYJJVzCRAXCCtrG6loG6xf1kZZuy7Ml8JL1JSId8EuQED5dEM1BKAtjTWIxMj7p4tIg5ngARQs%2FkCFQZrwFGOKXajUURDed1Y2MUz1L4gCeKZetlniWM53kIX8J5BQU2ZCTPJ7yLW0tYFLnZto9wNuwVdMTjM%2BseEESkrEiAB1zsDfpeC6IEWTpiPMF2%2B3tJFDQd%2BxcBq6ZMqUm7l8x5gZgaiX7pIi7C4m7lGp3r%2FBuPPwveDmBF%2BZhGXQ%3D%3D",
+                                    "short_desc": "Himira Store",
+                                    "long_desc": "Himira Store",
+                                    "images": [
+                                        "https://storage.googleapis.com/hp-seller-preprod/logo?GoogleAccessId=hp-ondc-sa%40hp-gov.iam.gserviceaccount.com&Expires=2104115225&Signature=6Q7Ulph%2BOoO4%2FNOb0VGC3tJF%2FfMe9jCfIh%2FvBUiiIFtzG3BzI%2BY%2BBdCgQaeqaxWg%2B3%2FCCm6%2Bt15nFHEVpkNl6ZkL9Uu%2BgYJJVzCRAXCCtrG6loG6xf1kZZuy7Ml8JL1JSId8EuQED5dEM1BKAtjTWIxMj7p4tIg5ngARQs%2FkCFQZrwFGOKXajUURDed1Y2MUz1L4gCeKZetlniWM53kIX8J5BQU2ZCTPJ7yLW0tYFLnZto9wNuwVdMTjM%2BseEESkrEiAB1zsDfpeC6IEWTpiPMF2%2B3tJFDQd%2BxcBq6ZMqUm7l8x5gZgaiX7pIi7C4m7lGp3r%2FBuPPwveDmBF%2BZhGXQ%3D%3D"
+                                    ]
+                                },
+                                "time": {
+                                    "label": "enable",
+                                    "timestamp": "2025-09-11T13:25:55.474Z"
+                                },
+                                "@ondc/org/fssai_license_no": "12345678901234",
+                                "ttl": "PT24H",
+                                "fulfillments": [
+                                    {
+                                        "id": "1",
+                                        "type": "Delivery",
+                                        "contact": {
+                                            "email": "naman.pawar@thewitslab.com",
+                                            "phone": "7505390422"
+                                        }
+                                    }
+                                ],
+                                "tags": [
+                                    {
+                                        "code": "serviceability",
+                                        "list": [
+                                            {
+                                                "code": "location",
+                                                "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                            },
+                                            {
+                                                "code": "category",
+                                                "value": "Tinned and Processed Food"
+                                            },
+                                            {
+                                                "code": "type",
+                                                "value": "12"
+                                            },
+                                            {
+                                                "code": "unit",
+                                                "value": "country"
+                                            },
+                                            {
+                                                "code": "val",
+                                                "value": "IND"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "serviceability",
+                                        "list": [
+                                            {
+                                                "code": "location",
+                                                "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                            },
+                                            {
+                                                "code": "category",
+                                                "value": "Salt, Sugar and Jaggery"
+                                            },
+                                            {
+                                                "code": "type",
+                                                "value": "12"
+                                            },
+                                            {
+                                                "code": "unit",
+                                                "value": "country"
+                                            },
+                                            {
+                                                "code": "val",
+                                                "value": "IND"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "serviceability",
+                                        "list": [
+                                            {
+                                                "code": "location",
+                                                "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                            },
+                                            {
+                                                "code": "category",
+                                                "value": "Oil & Ghee"
+                                            },
+                                            {
+                                                "code": "type",
+                                                "value": "12"
+                                            },
+                                            {
+                                                "code": "unit",
+                                                "value": "country"
+                                            },
+                                            {
+                                                "code": "val",
+                                                "value": "IND"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "serviceability",
+                                        "list": [
+                                            {
+                                                "code": "location",
+                                                "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                            },
+                                            {
+                                                "code": "category",
+                                                "value": "Pickles and Chutney"
+                                            },
+                                            {
+                                                "code": "type",
+                                                "value": "12"
+                                            },
+                                            {
+                                                "code": "unit",
+                                                "value": "country"
+                                            },
+                                            {
+                                                "code": "val",
+                                                "value": "IND"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "serviceability",
+                                        "list": [
+                                            {
+                                                "code": "location",
+                                                "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                            },
+                                            {
+                                                "code": "category",
+                                                "value": "Frozen Vegetables"
+                                            },
+                                            {
+                                                "code": "type",
+                                                "value": "12"
+                                            },
+                                            {
+                                                "code": "unit",
+                                                "value": "country"
+                                            },
+                                            {
+                                                "code": "val",
+                                                "value": "IND"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "serviceability",
+                                        "list": [
+                                            {
+                                                "code": "location",
+                                                "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                            },
+                                            {
+                                                "code": "category",
+                                                "value": "Masala & Seasoning"
+                                            },
+                                            {
+                                                "code": "type",
+                                                "value": "12"
+                                            },
+                                            {
+                                                "code": "unit",
+                                                "value": "country"
+                                            },
+                                            {
+                                                "code": "val",
+                                                "value": "IND"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "serviceability",
+                                        "list": [
+                                            {
+                                                "code": "location",
+                                                "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                            },
+                                            {
+                                                "code": "category",
+                                                "value": "Fruits and Vegetables"
+                                            },
+                                            {
+                                                "code": "type",
+                                                "value": "12"
+                                            },
+                                            {
+                                                "code": "unit",
+                                                "value": "country"
+                                            },
+                                            {
+                                                "code": "val",
+                                                "value": "IND"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "timing",
+                                        "list": [
+                                            {
+                                                "code": "type",
+                                                "value": "All"
+                                            },
+                                            {
+                                                "code": "location",
+                                                "value": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                            },
+                                            {
+                                                "code": "day_from",
+                                                "value": "1"
+                                            },
+                                            {
+                                                "code": "day_to",
+                                                "value": "7"
+                                            },
+                                            {
+                                                "code": "time_from",
+                                                "value": "0000"
+                                            },
+                                            {
+                                                "code": "time_to",
+                                                "value": "2359"
+                                            }
+                                        ]
+                                    }
+                                ],
+                                "local_id": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c",
+                                "slug": "Himira-Store-4c6840",
+                                "locations": [
+                                    {
+                                        "id": "hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_d871c2ae-bf3f-4d3c-963f-f85f94848e8c",
+                                        "gps": "0,0",
+                                        "address": {
+                                            "city": "Mohali",
+                                            "state": "Punjab",
+                                            "area_code": "140301",
+                                            "street": "Eco Floors 1",
+                                            "locality": "Sector 125"
+                                        },
+                                        "time": {
+                                            "label": "enable",
+                                            "timestamp": "2025-09-11T13:25:55.474Z",
+                                            "days": "1,2,3,4,5,6,7",
+                                            "schedule": {
+                                                "holidays": [
+                                                    "2027-10-23"
+                                                ]
+                                            },
+                                            "range": {
+                                                "start": "0000",
+                                                "end": "2359"
+                                            }
+                                        },
+                                        "circle": {
+                                            "gps": "0,0",
+                                            "radius": {
+                                                "unit": "km",
+                                                "value": "3"
+                                            }
+                                        },
+                                        "local_id": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c"
+                                    }
+                                ]
+                            },
+                            "product": {
+                                "id": "f383d5a7-363e-4fbe-949e-dc5800db5608",
+                                "time": {
+                                    "label": "enable",
+                                    "timestamp": "2025-07-16T11:30:20.784Z"
+                                },
+                                "parent_item_id": "",
+                                "descriptor": {
+                                    "name": "Kiwi Jam",
+                                    "code": "1:4000",
+                                    "symbol": "https://hp-buyer-cdn-prod.thewitslab.com/Grocery/Kiwi-Jam/1.jpeg",
+                                    "short_desc": "There are no chemical preservatives, no artificial colours or flavours are added in the Jam.",
+                                    "long_desc": "We make very low-sugar, tasty, healthy and fresh fruit spreads, so that you experience the natural flavour of fruit. Our jams are 80% fruit by weight, so in every spoonful you also consume a healthy portion of condensed fruit.",
+                                    "images": [
+                                        "https://hp-buyer-cdn-prod.thewitslab.com/Grocery/Kiwi-Jam/1.jpeg",
+                                        "https://hp-buyer-cdn-prod.thewitslab.com/Grocery/Kiwi-Jam/2.jpeg",
+                                        "https://hp-buyer-cdn-prod.thewitslab.com/Grocery/Kiwi-Jam/3.jpeg"
+                                    ]
+                                },
+                                "quantity": {
+                                    "unitized": {
+                                        "measure": {
+                                            "unit": "gram",
+                                            "value": "250"
+                                        }
+                                    },
+                                    "available": {
+                                        "count": "99"
+                                    },
+                                    "maximum": {
+                                        "count": "5"
+                                    }
+                                },
+                                "price": {
+                                    "currency": "INR",
+                                    "value": 299,
+                                    "maximum_value": "565"
+                                },
+                                "category_ids": [],
+                                "category_id": "Tinned and Processed Food",
+                                "location_id": "d871c2ae-bf3f-4d3c-963f-f85f94848e8c",
+                                "fulfillment_id": "1",
+                                "@ondc/org/returnable": true,
+                                "@ondc/org/cancellable": true,
+                                "@ondc/org/available_on_cod": false,
+                                "@ondc/org/time_to_ship": "P0D",
+                                "@ondc/org/seller_pickup_return": true,
+                                "@ondc/org/return_window": "PT168H",
+                                "@ondc/org/contact_details_consumer_care": "Himira Store,pawarnaman11@gmail.com,9816012233",
+                                "@ondc/org/statutory_reqs_packaged_commodities": {
+                                    "manufacturer_or_packer_name": "Ever Green Self Help Group",
+                                    "manufacturer_or_packer_address": "Village-Pamlahi, Post Office-Thanedhar, Tehsil-Kumarsain,District-Shimla, Pin- 172030Himachal Pradesh",
+                                    "common_or_generic_name_of_commodity": "Jams",
+                                    "month_year_of_manufacture_packing_import": "06/2024"
+                                },
+                                "@ondc/org/statutory_reqs_prepackaged_food": {
+                                    "nutritional_info": "NA",
+                                    "additives_info": "NA",
+                                    "brand_owner_FSSAI_license_no": "NA",
+                                    "other_FSSAI_license_no": "NA",
+                                    "importer_FSSAI_license_no": "NA"
+                                },
+                                "tags": [
+                                    {
+                                        "code": "origin",
+                                        "list": [
+                                            {
+                                                "code": "country",
+                                                "value": "IND"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "type",
+                                        "list": [
+                                            {
+                                                "code": "type",
+                                                "value": "item"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "image",
+                                        "list": [
+                                            {
+                                                "code": "type",
+                                                "value": "back_image"
+                                            },
+                                            {
+                                                "code": "url",
+                                                "value": "https://hp-buyer-cdn-prod.thewitslab.com/Grocery/Kiwi-Jam/3.jpeg"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "code": "veg_nonveg",
+                                        "list": [
+                                            {
+                                                "code": "veg",
+                                                "value": "yes"
+                                            }
+                                        ]
+                                    }
+                                ],
+                                "slug": "Kiwi-Jam-5adcb8",
+                                "subtotal": 299
+                            },
+                            "userId": "",
+                            "deviceId": "",
+                            "customisationState": {},
+                            "customisations": null,
+                            "hasCustomisations": false,
+                            "attributes": {},
+                            "related_items": 0
+                        }
+                    }
+                ],
+                "total_items": 1,
+                "total_value": 299.0,
+                "is_empty": false
+            }
+        },
+        "_context_type": "cart_view",
+        "_ui_hints": {
+            "render_as": "cart_summary",
+            "enable_actions": [
+                "update_quantity",
+                "remove_item",
+                "checkout"
+            ],
+            "suggested_actions": [
+                "Ready to checkout?",
+                "Continue shopping"
+            ],
+            "display_priority": "high"
+        }
+    },
+    "context_type": "cart_view",
+    "action_required": false
+}

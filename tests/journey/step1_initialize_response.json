@@ -1,0 +1,24 @@
+{
+    "response": "\u2705 **Session Ready with Your Himira Credentials!**\n\n**Session ID:** `session_62846bbc1e7b4c8f9ca457a4a1e9d0cb`\n**Your User ID:** `EUSJ0ypAJJVdo3gXrUJe4uIBwDB2`\n**Your Device ID:** `ed0bda0dd8c167a73721be5bb142dfc9`\n\n\u2705 **Using Your Himira Credentials**\n\n\ud83d\udecd\ufe0f **Your cart and order history are now accessible!**\n\n**Start Shopping:**\n\u2022 `search_products query='organic rice'`\n\u2022 `view_cart` - See your existing cart\n\u2022 `browse_categories`\n\n\ud83d\ude80 **Full Order Journey Available:**\nSearch \u2192 Cart \u2192 Checkout \u2192 Payment \u2192 Delivery\n\nReady to shop! What would you like to find?",
+    "session_id": "session_62846bbc1e7b4c8f9ca457a4a1e9d0cb",
+    "device_id": "ed0bda0dd8c167a73721be5bb142dfc9",
+    "timestamp": "2025-09-28T14:24:57.506169",
+    "data": {
+        "success": true,
+        "message": "\u2705 **Session Ready with Your Himira Credentials!**\n\n**Session ID:** `session_62846bbc1e7b4c8f9ca457a4a1e9d0cb`\n**Your User ID:** `EUSJ0ypAJJVdo3gXrUJe4uIBwDB2`\n**Your Device ID:** `ed0bda0dd8c167a73721be5bb142dfc9`\n\n\u2705 **Using Your Himira Credentials**\n\n\ud83d\udecd\ufe0f **Your cart and order history are now accessible!**\n\n**Start Shopping:**\n\u2022 `search_products query='organic rice'`\n\u2022 `view_cart` - See your existing cart\n\u2022 `browse_categories`\n\n\ud83d\ude80 **Full Order Journey Available:**\nSearch \u2192 Cart \u2192 Checkout \u2192 Payment \u2192 Delivery\n\nReady to shop! What would you like to find?",
+        "session": {
+            "session_id": "session_62846bbc1e7b4c8f9ca457a4a1e9d0cb"
+        },
+        "_debug_force_execution": true,
+        "_operation_id": "c088025b-eb3f-411e-99b8-dcb854cc8524",
+        "_fresh_execution_requested": true,
+        "_timestamp": "2025-09-28T14:24:53.486804",
+        "_bypass_cache": true,
+        "authenticated_mode": true,
+        "user_id": "EUSJ0ypAJJVdo3gXrUJe4uIBwDB2",
+        "device_id": "ed0bda0dd8c167a73721be5bb142dfc9",
+        "next_action": "start_shopping"
+    },
+    "context_type": "success_message",
+    "action_required": false
+}
