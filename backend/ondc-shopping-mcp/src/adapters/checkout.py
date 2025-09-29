@@ -505,11 +505,11 @@ async def confirm_order(
                 session_obj.session_id
             )
 
-        # Validate session is in INIT stage
+        # Validate session is in INIT stage (payment creation keeps session in INIT)
         if session_obj.checkout_state.stage.value != 'init':
             return format_mcp_response(
                 False,
-                ' Please complete delivery and payment details first using initialize_order.',
+                f' Please complete delivery and payment details first. Current stage: {session_obj.checkout_state.stage.value}',
                 session_obj.session_id
             )
 

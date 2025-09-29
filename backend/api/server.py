@@ -5,6 +5,7 @@ FastAPI server with MCP-Agent integration for frontend applications
 """
 
 import os
+import re
 import uuid
 import json
 import logging
@@ -247,6 +248,32 @@ def generate_device_id() -> str:
 def generate_session_id() -> str:
     """Generate a unique session ID."""
     return f"session_{uuid.uuid4().hex}"
+
+def extract_session_id_from_message(message: str) -> Optional[str]:
+    """Extract session_id from MCP tool calls in message text.
+    
+    Supports patterns like:
+    - search_products(query='turmeric', session_id='session_abc123')
+    - add_to_cart(item={...}, session_id="session_xyz789")
+    
+    Args:
+        message: The message text that may contain MCP tool calls
+        
+    Returns:
+        The extracted session_id if found, None otherwise
+    """
+    # Regex pattern to match session_id parameter in MCP tool calls
+    # Matches: session_id='session_xyz' or session_id="session_xyz"
+    pattern = r"session_id\s*=\s*['\"]?(session_[a-zA-Z0-9_]+)['\"]?"
+    
+    match = re.search(pattern, message)
+    if match:
+        session_id = match.group(1)
+        logger.info(f"[SESSION EXTRACTION] Found session_id in message: {session_id}")
+        return session_id
+    
+    logger.debug("[SESSION EXTRACTION] No session_id found in message text")
+    return None
 
 
 def extract_essential_product_fields(product: Dict[str, Any]) -> Dict[str, Any]:
@@ -1298,8 +1325,22 @@ async def chat(request: Request, chat_req: ChatRequest):
     
     check_agent_ready()
     
+    # FIXED: Extract session_id from MCP tool calls FIRST before validation
+    # Priority: JSON body session_id → extract from message → generate new  
+    if chat_req.session_id:
+        actual_session_id = chat_req.session_id
+        logger.info(f"[SESSION ID] Using session_id from JSON body: {actual_session_id}")
+    else:
+        extracted_session_id = extract_session_id_from_message(chat_req.message)
+        if extracted_session_id:
+            actual_session_id = extracted_session_id
+            logger.info(f"[SESSION ID] Using session_id extracted from message: {actual_session_id}")
+        else:
+            actual_session_id = None
+            logger.info("[SESSION ID] No session_id found - will generate new for initialization")
+    
     # Check if this is a new session without credentials
-    if not chat_req.session_id:
+    if not actual_session_id:
         # New session - check if this is an initialization request
         if not is_initialization_request(chat_req.message):
             # Block all non-initialization requests for new sessions
@@ -1317,11 +1358,11 @@ async def chat(request: Request, chat_req: ChatRequest):
         # IMPORTANT: Only validate for non-initialization requests
         # Initialization requests need to be processed first to create the session data
         if not is_initialization_request(chat_req.message):
-            if not is_session_initialized(chat_req.session_id):
+            if not is_session_initialized(actual_session_id):
                 # Session exists but not initialized - require initialization
                 return ChatResponse(
                     response=get_initialization_required_response(),
-                    session_id=chat_req.session_id,
+                    session_id=actual_session_id,
                     device_id=chat_req.device_id or "",
                     timestamp=datetime.now(),
                     data=None,
@@ -1331,7 +1372,7 @@ async def chat(request: Request, chat_req: ChatRequest):
     
     # Generate IDs if not provided (only for initialization requests)
     device_id = chat_req.device_id or generate_device_id()
-    session_id = chat_req.session_id or generate_session_id()
+    session_id = actual_session_id or generate_session_id()
     
     # FIXED: API server should ONLY READ MCP sessions, never write
     # Session creation and management is handled exclusively by MCP tools

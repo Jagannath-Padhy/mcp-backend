@@ -1516,11 +1516,11 @@ Ready to proceed with order initialization!"""
         Returns:
             Final order confirmation with order ID
         """
-        # Validate session is in INIT stage
+        # Validate session is in INIT stage (payment creation keeps session in INIT)
         if session.checkout_state.stage != CheckoutStage.INIT:
             return {
                 'success': False,
-                'message': ' Please complete delivery and payment details first.'
+                'message': f' Please complete delivery and payment details first. Current stage: {session.checkout_state.stage.value}'
             }
         
         # Validate required data is present
