@@ -1,14 +1,14 @@
 """User profile management operations for MCP adapters"""
 
 from typing import Dict, Any, Optional
-from .utils import (
+from src.adapters.utils import (
     get_persistent_session, 
     save_persistent_session, 
     extract_session_id, 
     format_mcp_response,
     get_services
 )
-from ..utils.logger import get_logger
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -27,7 +27,7 @@ async def get_user_profile(
     Get user profile information
     
     Args:
-        user_id: User ID (Firebase user ID or "guestUser")
+        user_id: User ID (Must be real Himira user ID)
         device_id: Device ID for guest users
         session_id: MCP session ID (optional)
         
@@ -41,10 +41,10 @@ async def get_user_profile(
         logger.info(f"[Profile] Get user profile - User: {user_id}, Device: {device_id}")
         
         # Check authentication for profile operations
-        if user_id == "guestUser":
+        if not user_id or not session_obj.user_authenticated or not session_obj.auth_token:
             return format_mcp_response(
                 False,
-                "🔐 Profile access requires login. Please authenticate first.",
+                "🔐 Profile access requires Himira credentials. Please call initialize_shopping with your userId/deviceId first.",
                 session_obj.session_id
             )
         
@@ -55,9 +55,9 @@ async def get_user_profile(
                 session_obj.session_id
             )
         
-        # Get profile from backend
-        from ..buyer_backend_client import BuyerBackendClient
-        buyer_app = BuyerBackendClient()
+        # Get profile from backend using singleton with debug logging
+        from src.buyer_backend_client import get_buyer_backend_client
+        buyer_app = get_buyer_backend_client()
         
         result = await buyer_app.get_user_profile(session_obj.auth_token)
         
@@ -117,7 +117,7 @@ async def update_user_profile(
     
     Args:
         profile_data: Profile update data (name, email, etc.)
-        user_id: User ID (Firebase user ID or "guestUser")
+        user_id: User ID (Must be real Himira user ID)
         device_id: Device ID for guest users
         session_id: MCP session ID (optional)
         
@@ -131,10 +131,10 @@ async def update_user_profile(
         logger.info(f"[Profile] Update user profile - User: {user_id}, Device: {device_id}")
         
         # Check authentication for profile operations
-        if user_id == "guestUser":
+        if not user_id or not session_obj.user_authenticated or not session_obj.auth_token:
             return format_mcp_response(
                 False,
-                "🔐 Profile updates require login. Please authenticate first.",
+                "🔐 Profile updates require Himira credentials. Please call initialize_shopping with your userId/deviceId first.",
                 session_obj.session_id
             )
         
@@ -145,9 +145,9 @@ async def update_user_profile(
                 session_obj.session_id
             )
         
-        # Update profile via backend
-        from ..buyer_backend_client import BuyerBackendClient
-        buyer_app = BuyerBackendClient()
+        # Update profile via backend using singleton with debug logging
+        from src.buyer_backend_client import get_buyer_backend_client
+        buyer_app = get_buyer_backend_client()
         
         result = await buyer_app.update_user_profile(profile_data, session_obj.auth_token)
         

@@ -5,7 +5,7 @@ Functions are grouped by domain for better maintainability and organization.
 """
 
 # Import all adapter functions from organized modules
-from .adapters.utils import (
+from src.adapters.utils import (
     get_persistent_session,
     save_persistent_session,
     extract_session_id,
@@ -14,7 +14,7 @@ from .adapters.utils import (
     get_services
 )
 
-from .adapters.cart import (
+from src.adapters.cart import (
     add_to_cart,
     view_cart,
     remove_from_cart,
@@ -23,29 +23,29 @@ from .adapters.cart import (
     get_cart_total
 )
 
-from .adapters.search import (
+from src.adapters.search import (
     search_products,
     advanced_search,
     browse_categories
 )
 
-from .adapters.checkout import (
+from src.adapters.checkout import (
     select_items_for_order,
     initialize_order,
     create_payment,
     confirm_order
 )
 
-from .adapters.auth import (
+from src.adapters.auth import (
     phone_login
 )
 
-from .adapters.session import (
+from src.adapters.session import (
     initialize_shopping,
     get_session_info
 )
 
-from .adapters.orders import (
+from src.adapters.orders import (
     initiate_payment,
     confirm_order_simple,
     get_order_status,

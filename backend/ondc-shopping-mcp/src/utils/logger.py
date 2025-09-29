@@ -174,7 +174,7 @@ class MCPOperationsLogger:
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "event_type": "mcp_request",
             "tool": tool_name,
-            "session_id": session_id[:16] + "..." if len(session_id) > 16 else session_id,
+            "session_id": session_id[:16] + "..." if session_id and len(session_id) > 16 else (session_id or ""),
             "request": self._truncate_data(self._filter_vector_data(request_data))
         }
         
@@ -187,7 +187,7 @@ class MCPOperationsLogger:
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "event_type": "mcp_response", 
             "tool": tool_name,
-            "session_id": session_id[:16] + "..." if len(session_id) > 16 else session_id,
+            "session_id": session_id[:16] + "..." if session_id and len(session_id) > 16 else (session_id or ""),
             "execution_time_ms": round(execution_time_ms, 2),
             "status": status,
             "backend_calls": backend_calls or [],
@@ -202,7 +202,7 @@ class MCPOperationsLogger:
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "event_type": "mcp_error",
             "tool": tool_name, 
-            "session_id": session_id[:16] + "..." if len(session_id) > 16 else session_id,
+            "session_id": session_id[:16] + "..." if session_id and len(session_id) > 16 else (session_id or ""),
             "execution_time_ms": round(execution_time_ms, 2),
             "status": "error",
             "error": {

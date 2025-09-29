@@ -1,15 +1,15 @@
 """Order management operations for MCP adapters"""
 
 from typing import Dict, Any, Optional
-from .utils import (
+from src.adapters.utils import (
     get_persistent_session, 
     save_persistent_session, 
     extract_session_id, 
     format_mcp_response,
     get_services
 )
-from ..models.session import CheckoutStage
-from ..utils.logger import get_logger
+from src.models.session import CheckoutStage
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

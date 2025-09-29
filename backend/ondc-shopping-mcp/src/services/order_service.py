@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 import logging
 
-from ..buyer_backend_client import BuyerBackendClient
+from ..buyer_backend_client import BuyerBackendClient, get_buyer_backend_client
 from ..models.session import Session
 from ..utils.logger import get_logger
 
@@ -35,7 +35,7 @@ class OrderService:
         Args:
             buyer_backend_client: Comprehensive client for backend API calls
         """
-        self.buyer_app = buyer_backend_client or BuyerBackendClient()
+        self.buyer_app = buyer_backend_client or get_buyer_backend_client()
         logger.info("OrderService initialized with comprehensive ONDC flow support")
     
     # ================================

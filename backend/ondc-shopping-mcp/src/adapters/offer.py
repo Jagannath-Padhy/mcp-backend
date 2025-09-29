@@ -1,14 +1,14 @@
 """Offer management operations for MCP adapters"""
 
 from typing import Dict, Any, Optional, List
-from .utils import (
+from src.adapters.utils import (
     get_persistent_session, 
     save_persistent_session, 
     extract_session_id, 
     format_mcp_response,
     get_services
 )
-from ..utils.logger import get_logger
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -27,7 +27,7 @@ async def get_active_offers(
     Get active offers available to user
     
     Args:
-        user_id: User ID (Firebase user ID or "guestUser")
+        user_id: User ID (Must be real Himira user ID)
         device_id: Device ID for guest users
         session_id: MCP session ID (optional)
         
@@ -40,9 +40,9 @@ async def get_active_offers(
         
         logger.info(f"[Offer] Get active offers - User: {user_id}, Device: {device_id}")
         
-        # Get offers from backend
-        from ..buyer_backend_client import BuyerBackendClient
-        buyer_app = BuyerBackendClient()
+        # Get offers from backend using singleton with debug logging
+        from src.buyer_backend_client import get_buyer_backend_client
+        buyer_app = get_buyer_backend_client()
         
         result = await buyer_app.get_active_offers(user_id, device_id)
         
@@ -97,7 +97,7 @@ async def get_applied_offers(
     Get offers already applied to user's cart/order
     
     Args:
-        user_id: User ID (Firebase user ID or "guestUser")
+        user_id: User ID (Must be real Himira user ID)
         device_id: Device ID for guest users
         session_id: MCP session ID (optional)
         
@@ -111,8 +111,8 @@ async def get_applied_offers(
         logger.info(f"[Offer] Get applied offers - User: {user_id}, Device: {device_id}")
         
         # Get applied offers from backend
-        from ..buyer_backend_client import BuyerBackendClient
-        buyer_app = BuyerBackendClient()
+        from src.buyer_backend_client import get_buyer_backend_client
+        buyer_app = get_buyer_backend_client()
         
         result = await buyer_app.get_applied_offers(user_id, device_id)
         
@@ -167,7 +167,7 @@ async def apply_offer(
     
     Args:
         offer_id: ID of the offer to apply
-        user_id: User ID (Firebase user ID or "guestUser")
+        user_id: User ID (Must be real Himira user ID)
         device_id: Device ID for guest users
         session_id: MCP session ID (optional)
         
@@ -181,8 +181,8 @@ async def apply_offer(
         logger.info(f"[Offer] Apply offer - User: {user_id}, Offer ID: {offer_id}")
         
         # Apply offer via backend
-        from ..buyer_backend_client import BuyerBackendClient
-        buyer_app = BuyerBackendClient()
+        from src.buyer_backend_client import get_buyer_backend_client
+        buyer_app = get_buyer_backend_client()
         
         result = await buyer_app.apply_offer(offer_id, user_id, device_id)
         
@@ -226,7 +226,7 @@ async def clear_offers(
     Clear all applied offers from user's cart
     
     Args:
-        user_id: User ID (Firebase user ID or "guestUser")
+        user_id: User ID (Must be real Himira user ID)
         device_id: Device ID for guest users
         session_id: MCP session ID (optional)
         
@@ -240,8 +240,8 @@ async def clear_offers(
         logger.info(f"[Offer] Clear offers - User: {user_id}, Device: {device_id}")
         
         # Clear offers via backend
-        from ..buyer_backend_client import BuyerBackendClient
-        buyer_app = BuyerBackendClient()
+        from src.buyer_backend_client import get_buyer_backend_client
+        buyer_app = get_buyer_backend_client()
         
         result = await buyer_app.clear_offers(user_id, device_id)
         
@@ -291,7 +291,7 @@ async def delete_offer(
     
     Args:
         offer_id: ID of the offer to remove
-        user_id: User ID (Firebase user ID or "guestUser")
+        user_id: User ID (Must be real Himira user ID)
         device_id: Device ID for guest users
         session_id: MCP session ID (optional)
         
@@ -305,8 +305,8 @@ async def delete_offer(
         logger.info(f"[Offer] Delete offer - User: {user_id}, Offer ID: {offer_id}")
         
         # Delete offer via backend
-        from ..buyer_backend_client import BuyerBackendClient
-        buyer_app = BuyerBackendClient()
+        from src.buyer_backend_client import get_buyer_backend_client
+        buyer_app = get_buyer_backend_client()
         
         result = await buyer_app.delete_offer(offer_id, user_id, device_id)
         

@@ -1,16 +1,26 @@
 """Search operations for MCP adapters"""
 
+import sys
+import os
+
+# Ensure Python path is set for tool execution context
+current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 from typing import Dict, Any, Optional
 from datetime import datetime
-from .utils import (
+from src.adapters.utils import (
     get_persistent_session, 
     save_persistent_session, 
     extract_session_id, 
     format_mcp_response,
+    format_products_for_ai,
+    create_enhanced_response,
     get_services
 )
-from ..utils.logger import get_logger
-from ..utils.field_mapper import enhance_for_mcp
+from src.utils.logger import get_logger
+from src.utils.field_mapper import enhance_for_mcp
 
 logger = get_logger(__name__)
 
@@ -20,7 +30,7 @@ search_service = services['search_service']
 session_service = services['session_service']
 
 
-async def search_products(session_id: Optional[str] = None, query: str = '', 
+async def search_products(query: str = '', session_id: Optional[str] = None,
                              latitude: Optional[float] = None,
                              longitude: Optional[float] = None,
                              page: int = 1, limit: int = 10, 
@@ -76,15 +86,35 @@ async def search_products(session_id: Optional[str] = None, query: str = '',
         # Save session with enhanced persistence
         save_persistent_session(session_obj, conversation_manager)
         
-        return format_mcp_response(
+        # ✅ FIXED: Separate AI vs UI data to prevent token bloat
+        # AI gets minimal product data, UI gets full data with images, stock, ratings
+        ai_products = format_products_for_ai(products)
+        
+        # ✅ NEW: Create enhanced products for frontend with complete data
+        from .utils import create_enhanced_product_for_frontend
+        ui_products = [create_enhanced_product_for_frontend(product) for product in products]
+        
+        return create_enhanced_response(
             results.get('success', True),
             message,
             session_obj.session_id,
-            products=products,  # Will be formatted by format_mcp_response
-            total_results=results.get('total_results', 0),
-            search_type=results.get('search_type', 'unknown'),
-            page=results.get('page', 1),
-            page_size=results.get('page_size', 10)
+            ai_data={
+                'products': ai_products,  # Minimal for AI: names, prices, IDs, stock status
+                'total_results': results.get('total_results', 0),
+                'search_type': results.get('search_type', 'unknown'),
+                'page': results.get('page', 1),
+                'page_size': results.get('page_size', 10)
+            },
+            ui_data={
+                'products': ui_products,  # Enhanced for UI: images, descriptions, ratings, stock
+                'search_metadata': {
+                    'total_results': results.get('total_results', 0),
+                    'search_type': results.get('search_type', 'unknown'),
+                    'page': results.get('page', 1),
+                    'page_size': results.get('page_size', 10)
+                }
+            },
+            operation_type='search_products'
         )
         
     except Exception as e:

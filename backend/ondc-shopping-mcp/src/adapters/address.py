@@ -1,14 +1,14 @@
 """Address management operations for MCP adapters"""
 
 from typing import Dict, Any, Optional, List
-from .utils import (
+from src.adapters.utils import (
     get_persistent_session, 
     save_persistent_session, 
     extract_session_id, 
     format_mcp_response,
     get_services
 )
-from ..utils.logger import get_logger
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -41,10 +41,10 @@ async def get_delivery_addresses(
         logger.info(f"[Address] Get delivery addresses - User: {user_id}, Device: {device_id}")
         
         # Check authentication for address operations
-        if user_id == "guestUser":
+        if not user_id or not session_obj.user_authenticated or not session_obj.auth_token:
             return format_mcp_response(
                 False,
-                "🔐 Address management requires login. Please authenticate first.",
+                "🔐 Address management requires Himira credentials. Please call initialize_shopping with your userId/deviceId first.",
                 session_obj.session_id
             )
         
@@ -56,8 +56,8 @@ async def get_delivery_addresses(
             )
         
         # Get addresses from backend
-        from ..buyer_backend_client import BuyerBackendClient
-        buyer_app = BuyerBackendClient()
+        from src.buyer_backend_client import get_buyer_backend_client
+        buyer_app = get_buyer_backend_client()
         
         result = await buyer_app.get_delivery_addresses(session_obj.auth_token)
         
@@ -129,10 +129,10 @@ async def add_delivery_address(
         logger.info(f"[Address] Add delivery address - User: {user_id}, Device: {device_id}")
         
         # Check authentication for address operations
-        if user_id == "guestUser":
+        if not user_id or not session_obj.user_authenticated or not session_obj.auth_token:
             return format_mcp_response(
                 False,
-                "🔐 Adding addresses requires login. Please authenticate first.",
+                "🔐 Adding addresses requires Himira credentials. Please call initialize_shopping with your userId/deviceId first.",
                 session_obj.session_id
             )
         
@@ -155,8 +155,8 @@ async def add_delivery_address(
             )
         
         # Add address via backend
-        from ..buyer_backend_client import BuyerBackendClient
-        buyer_app = BuyerBackendClient()
+        from src.buyer_backend_client import get_buyer_backend_client
+        buyer_app = get_buyer_backend_client()
         
         result = await buyer_app.add_delivery_address(address_data, session_obj.auth_token)
         
@@ -217,16 +217,16 @@ async def update_delivery_address(
         logger.info(f"[Address] Update delivery address - User: {user_id}, Address ID: {address_id}")
         
         # Check authentication
-        if user_id == "guestUser" or not session_obj.user_authenticated or not session_obj.auth_token:
+        if not user_id or not session_obj.user_authenticated or not session_obj.auth_token:
             return format_mcp_response(
                 False,
-                "🔐 Please login to update delivery addresses.",
+                "🔐 Address updates require Himira credentials. Please call initialize_shopping with your userId/deviceId first.",
                 session_obj.session_id
             )
         
         # Update address via backend
-        from ..buyer_backend_client import BuyerBackendClient
-        buyer_app = BuyerBackendClient()
+        from src.buyer_backend_client import get_buyer_backend_client
+        buyer_app = get_buyer_backend_client()
         
         result = await buyer_app.update_delivery_address(address_id, address_data, session_obj.auth_token)
         
@@ -281,16 +281,16 @@ async def delete_delivery_address(
         logger.info(f"[Address] Delete delivery address - User: {user_id}, Address ID: {address_id}")
         
         # Check authentication
-        if user_id == "guestUser" or not session_obj.user_authenticated or not session_obj.auth_token:
+        if not user_id or not session_obj.user_authenticated or not session_obj.auth_token:
             return format_mcp_response(
                 False,
-                "🔐 Please login to delete delivery addresses.",
+                "🔐 Address deletion requires Himira credentials. Please call initialize_shopping with your userId/deviceId first.",
                 session_obj.session_id
             )
         
         # Delete address via backend
-        from ..buyer_backend_client import BuyerBackendClient
-        buyer_app = BuyerBackendClient()
+        from src.buyer_backend_client import get_buyer_backend_client
+        buyer_app = get_buyer_backend_client()
         
         result = await buyer_app.delete_delivery_address(address_id, session_obj.auth_token)
         

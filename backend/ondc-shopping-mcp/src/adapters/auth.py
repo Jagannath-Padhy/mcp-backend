@@ -1,13 +1,13 @@
 """Authentication operations for MCP adapters"""
 
 from typing import Dict, Any, Optional
-from .utils import (
+from src.adapters.utils import (
     get_persistent_session, 
     save_persistent_session, 
     extract_session_id, 
     format_mcp_response
 )
-from ..utils.logger import get_logger
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -52,9 +52,9 @@ async def phone_login(phone: str, session_id: Optional[str] = None, **kwargs) ->
         
         logger.info(f"[Auth] Phone login attempt: {normalized_phone}")
         
-        # Call backend loginWithPhone endpoint
-        from ..buyer_backend_client import BuyerBackendClient
-        buyer_app = BuyerBackendClient()
+        # Call backend loginWithPhone endpoint using singleton with debug logging
+        from src.buyer_backend_client import get_buyer_backend_client
+        buyer_app = get_buyer_backend_client()
         
         result = await buyer_app.login_with_phone({"phone": normalized_phone})
         

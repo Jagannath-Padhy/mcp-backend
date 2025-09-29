@@ -1,7 +1,7 @@
-"""BIAP Validation Service - matches Node.js validation logic"""
+"""BIAP Validation Service - DEPRECATED"""
 
 from typing import List, Optional, Dict, Any
-from ..models.session import CartItem
+# CartItem removed - validation now uses backend cart data
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -9,150 +9,43 @@ logger = get_logger(__name__)
 
 class BiapValidationService:
     """
-    BIAP validation service matching Node.js implementation
-    Prevents checkout with items from multiple BPPs or providers
+    DEPRECATED: BIAP validation now handled in pure backend mode
+    This service is kept for backward compatibility only
     """
     
-    def are_multiple_bpp_items_selected(self, items: Optional[List[CartItem]]) -> bool:
+    def are_multiple_bpp_items_selected(self, items: Optional[List[Dict[str, Any]]]) -> bool:
         """
-        Check if items from multiple BPPs are selected
-        Matches BIAP areMultipleBppItemsSelected function
-        
-        Args:
-            items: List of cart items to validate
-            
-        Returns:
-            True if items from multiple BPPs are selected
+        DEPRECATED: Check if items from multiple BPPs are selected
+        Now returns False as validation is done in backend
         """
-        if not items:
-            return False
-            
-        try:
-            # Get unique BPP IDs - matches BIAP logic: [...new Set(items.map(item => item.bpp_id))].length > 1
-            bpp_ids = set()
-            for item in items:
-                if item.bpp_id:
-                    bpp_ids.add(item.bpp_id)
-            
-            result = len(bpp_ids) > 1
-            if result:
-                logger.warning(f"[BiapValidation] Multiple BPPs detected: {list(bpp_ids)}")
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"[BiapValidation] Error checking multiple BPPs: {e}")
-            return False
+        logger.warning("are_multiple_bpp_items_selected is deprecated - returning False")
+        return False
     
-    def are_multiple_provider_items_selected(self, items: Optional[List[CartItem]]) -> bool:
+    def are_multiple_provider_items_selected(self, items: Optional[List[Dict[str, Any]]]) -> bool:
         """
-        Check if items from multiple providers are selected  
-        Matches BIAP areMultipleProviderItemsSelected function
-        
-        Args:
-            items: List of cart items to validate
-            
-        Returns:
-            True if items from multiple providers are selected
+        DEPRECATED: Check if items from multiple providers are selected
+        Now returns False as validation is done in backend
         """
-        if not items:
-            return False
-            
-        try:
-            # Get unique provider IDs - matches BIAP logic: [...new Set(items.map(item => item.provider.id))].length > 1
-            provider_ids = set()
-            for item in items:
-                if item.provider and isinstance(item.provider, dict):
-                    provider_id = item.provider.get('id') or item.provider.get('local_id')
-                    if provider_id:
-                        provider_ids.add(provider_id)
-            
-            result = len(provider_ids) > 1
-            if result:
-                logger.warning(f"[BiapValidation] Multiple providers detected: {list(provider_ids)}")
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"[BiapValidation] Error checking multiple providers: {e}")
-            return False
+        logger.warning("are_multiple_provider_items_selected is deprecated - returning False")
+        return False
     
-    def validate_order_items(self, items: Optional[List[CartItem]], operation: str = "select") -> Dict[str, Any]:
+    def validate_order_items(self, items: Optional[List[Dict[str, Any]]], stage: str = "select") -> Dict[str, Any]:
         """
-        Validate order items for BIAP compliance
-        Matches BIAP validation flow used in select, init, and confirm operations
-        
-        Args:
-            items: List of cart items to validate
-            operation: Operation being performed (select, init, confirm)
-            
-        Returns:
-            Validation result with success/error info
+        DEPRECATED: Validate order items for BIAP compliance
+        Now always returns success as validation is done in backend
         """
-        if not items:
-            return {
-                "success": False,
-                "error": {"message": "Empty order received"}
-            }
-        
-        # Check for multiple BPP items - matches BIAP logic
-        if self.are_multiple_bpp_items_selected(items):
-            return {
-                "success": False,
-                "error": {"message": "More than one BPP's item(s) selected/initialized"}
-            }
-        
-        # Check for multiple provider items - matches BIAP logic
-        if self.are_multiple_provider_items_selected(items):
-            return {
-                "success": False, 
-                "error": {"message": "More than one Provider's item(s) selected/initialized"}
-            }
-        
-        logger.info(f"[BiapValidation] {operation.capitalize()} validation passed for {len(items)} items")
-        return {"success": True}
+        logger.warning(f"validate_order_items is deprecated for stage '{stage}' - returning success")
+        return {
+            'success': True,
+            'message': 'Validation passed (backend mode)'
+        }
     
-    def get_order_bpp_info(self, items: Optional[List[CartItem]]) -> Optional[Dict[str, str]]:
+    def get_order_bpp_info(self, items: Optional[List[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
         """
-        Get BPP information from validated order items
-        Used after validation passes to extract BPP details
-        
-        Args:
-            items: List of cart items (already validated)
-            
-        Returns:
-            Dictionary with bpp_id and bpp_uri or None
+        DEPRECATED: Get BPP info from order items
+        Now returns None as info is managed in backend
         """
-        if not items:
-            return None
-            
-        for item in items:
-            if item.bpp_id:
-                return {
-                    "bpp_id": item.bpp_id,
-                    "bpp_uri": item.bpp_uri or ""
-                }
-        
-        return None
-    
-    def get_order_provider_info(self, items: Optional[List[CartItem]]) -> Optional[Dict[str, Any]]:
-        """
-        Get provider information from validated order items
-        Used after validation passes to extract provider details
-        
-        Args:
-            items: List of cart items (already validated)
-            
-        Returns:
-            Provider info dictionary or None
-        """
-        if not items:
-            return None
-            
-        for item in items:
-            if item.provider and isinstance(item.provider, dict):
-                return item.provider
-        
+        logger.warning("get_order_bpp_info is deprecated - returning None")
         return None
 
 

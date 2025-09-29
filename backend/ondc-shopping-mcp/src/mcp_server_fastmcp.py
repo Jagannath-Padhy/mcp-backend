@@ -14,43 +14,31 @@ Key Features:
 - Vector search integration
 - Comprehensive error handling
 
-=== AGENT INSTRUCTIONS ===
-You are an ONDC shopping assistant operating in GUEST MODE.
-Guest credentials are pre-configured:
-- userId: guestUser
-- deviceId: d58dc5e2119ae5430b93218937977939
-
-Order Journey Flow (complete up to on_init):
-1. initialize_shopping → Create guest session
-2. search_products → Find products
-3. add_to_cart → Add to cart (auto-detects from search)
-4. view_cart → Show cart contents
-5. select_items_for_order → Get delivery quotes (needs city, state, pincode)
-6. initialize_order → Set customer details (name, address, phone, email)
-7. [on_init response received - order draft ready]
-8. create_payment → [MOCK] Create test payment
-9. confirm_order → [MOCK] Confirm with mock payment
-
-IMPORTANT:
-- Never ask for login/authentication
-- Guide users sequentially through the flow
-- Collect required info at each stage
-- Mark [MOCK] for payment/confirm operations
-- See mcp_agent_instructions.md for detailed guidance
+Agent instructions are maintained in: mcp_agent_instructions.md
 """
 
 import asyncio
 import logging
 import time
+import uuid
+import traceback
+import os
+import sys
 from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass
 import json
+
+# Fix Python path for tool execution context
+# This ensures all tool imports work correctly even when called from FastMCP
+current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
 # Official MCP SDK imports
 from mcp.server.fastmcp import FastMCP, Context
 
 # Import existing functionality
-from .adapters.utils import (
+from src.adapters.utils import (
     get_persistent_session,
     save_persistent_session,
     extract_session_id,
@@ -60,22 +48,22 @@ from .adapters.utils import (
 )
 
 # Import all tool adapters
-from .adapters.cart import (
+from src.adapters.cart import (
     add_to_cart as cart_add_adapter,
     view_cart as cart_view_adapter,
-    remove_from_cart as cart_remove_adapter,
-    update_cart_quantity as cart_update_adapter,
+    # remove_from_cart as cart_remove_adapter,  # COMMENTED OUT - User requested simplification
+    # update_cart_quantity as cart_update_adapter,  # COMMENTED OUT - User requested simplification
     clear_cart as cart_clear_adapter,
     get_cart_total as cart_total_adapter
 )
 
-from .adapters.search import (
+from src.adapters.search import (
     search_products as search_adapter,
     advanced_search as advanced_search_adapter,
     browse_categories as categories_adapter
 )
 
-from .adapters.checkout import (
+from src.adapters.checkout import (
     select_items_for_order as select_items_adapter,
     initialize_order as init_order_adapter,
     create_payment as payment_adapter,
@@ -83,27 +71,27 @@ from .adapters.checkout import (
 )
 
 # GUEST MODE ONLY - Authentication disabled
-# from .adapters.auth import phone_login as auth_adapter
-from .adapters.session import (
+# from src.adapters.auth import phone_login as auth_adapter
+from src.adapters.session import (
     initialize_shopping as init_session_adapter,
     get_session_info as session_info_adapter
 )
 
-from .adapters.orders import (
+from src.adapters.orders import (
     initiate_payment as payment_init_adapter,
     confirm_order_simple as confirm_simple_adapter,
     get_order_status as order_status_adapter,
     track_order as track_adapter
 )
 
-from .adapters.address import (
+from src.adapters.address import (
     get_delivery_addresses as address_get_adapter,
     add_delivery_address as address_add_adapter,
     update_delivery_address as address_update_adapter,
     delete_delivery_address as address_delete_adapter
 )
 
-from .adapters.offer import (
+from src.adapters.offer import (
     get_active_offers as offer_get_active_adapter,
     get_applied_offers as offer_get_applied_adapter,
     apply_offer as offer_apply_adapter,
@@ -111,15 +99,15 @@ from .adapters.offer import (
     delete_offer as offer_delete_adapter
 )
 
-from .adapters.profile import (
+from src.adapters.profile import (
     get_user_profile as profile_get_adapter,
     update_user_profile as profile_update_adapter
 )
 
 # Import existing configuration and logging
-from .config import config
-from .utils import setup_mcp_logging, get_logger
-from .utils.logger import get_mcp_operations_logger
+from src.config import config
+from src.utils import setup_mcp_logging, get_logger
+from src.utils.logger import get_mcp_operations_logger
 
 logger = get_logger(__name__)
 mcp_ops_logger = get_mcp_operations_logger()
@@ -131,79 +119,42 @@ mcp = FastMCP("ondc-shopping")
 # SESSION HELPER FUNCTIONS
 # ============================================================================
 
-def extract_session_from_context(ctx: Context, **kwargs) -> Optional[str]:
-    """Extract session ID from MCP context and kwargs using biap-client patterns
+def extract_session_from_context(ctx: Context, **kwargs) -> str:
+    """Extract or generate unique session ID for conversation isolation
     
-    Enhanced to prefer existing sessions and maintain continuity between tool calls.
-    Session precedence order:
-    1. Explicit session_id parameter
-    2. Existing session from userId/deviceId combination
-    3. MCP transport context session
-    4. Default consistent session for testing
+    Maintains session persistence within conversations while ensuring
+    isolation between different conversations.
     """
-    from .services.session_service import get_session_service
-    session_service = get_session_service()
+    # Use imports from module level
     
-    session_id = None
+    # 1. Try to use MCP's built-in session_id if available
+    if hasattr(ctx, 'session_id') and ctx.session_id:
+        logger.info(f"[Session] Using MCP session: {ctx.session_id}")
+        return ctx.session_id
     
-    # Method 1: Direct session_id parameter (highest priority)
-    if kwargs.get('session_id'):
-        session_id = kwargs['session_id']
-        logger.info(f"[Session] Found explicit session_id: {session_id}")
-        return session_id
+    # 2. Check if session_id was provided in tool parameters
+    if 'session_id' in kwargs and kwargs['session_id']:
+        logger.info(f"[Session] Using provided session: {kwargs['session_id']}")
+        return kwargs['session_id']
     
-    # Method 2: Extract from userId/deviceId (biap-client pattern)
-    user_id = kwargs.get('userId') or kwargs.get('user_id')
-    device_id = kwargs.get('deviceId') or kwargs.get('device_id')
+    # 3. Check if there's a chat API session context (file-based approach)
+    # This allows chat API to set the session context that MCP tools can use
+    try:
+        import os
+        context_file = os.path.expanduser("~/.ondc-mcp/chat_session_context.txt")
+        if os.path.exists(context_file):
+            with open(context_file, 'r') as f:
+                chat_session = f.read().strip()
+                if chat_session:
+                    logger.info(f"[Session] Using chat API session from file: {chat_session}")
+                    return chat_session
+    except Exception as e:
+        logger.debug(f"[Session] Failed to read chat API session context: {e}")
     
-    # Create consistent session ID patterns
-    if user_id and device_id:
-        candidate_session_id = f"{user_id}_{device_id}"
-        # Check if this session already exists
-        existing_session = session_service.get(candidate_session_id)
-        if existing_session:
-            logger.info(f"[Session] Reusing existing session: {candidate_session_id}")
-            return candidate_session_id
-        else:
-            logger.info(f"[Session] Creating new session from userId/deviceId: {candidate_session_id}")
-            return candidate_session_id
-            
-    elif device_id and (not user_id or user_id == "guestUser"):
-        candidate_session_id = f"guest_{device_id}"
-        existing_session = session_service.get(candidate_session_id)
-        if existing_session:
-            logger.info(f"[Session] Reusing existing guest session: {candidate_session_id}")
-            return candidate_session_id
-        else:
-            logger.info(f"[Session] Creating new guest session: {candidate_session_id}")
-            return candidate_session_id
-            
-    elif user_id and user_id != "guestUser":
-        candidate_session_id = f"user_{user_id}"
-        existing_session = session_service.get(candidate_session_id)
-        if existing_session:
-            logger.info(f"[Session] Reusing existing user session: {candidate_session_id}")
-            return candidate_session_id
-        else:
-            logger.info(f"[Session] Creating new user session: {candidate_session_id}")
-            return candidate_session_id
-    
-    # Method 3: Extract from MCP context (transport session)
-    if hasattr(ctx, 'session') and ctx.session:
-        mcp_session_id = getattr(ctx.session, 'id', None)
-        if mcp_session_id:
-            logger.info(f"[Session] Found session in MCP context: {mcp_session_id}")
-            return mcp_session_id
-    
-    # Method 4: Check for existing default session (for test continuity)
-    default_session_id = "default_mcp_session"
-    existing_default = session_service.get(default_session_id)
-    if existing_default:
-        logger.info(f"[Session] Reusing existing default session: {default_session_id}")
-        return default_session_id
-    else:
-        logger.warning(f"[Session] Creating new default session for testing: {default_session_id}")
-        return default_session_id
+    # 4. Generate new session only if no existing session found
+    session_id = f"session_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+    logger.info(f"[Session] Generated new session: {session_id}")
+    return session_id
 
 async def handle_tool_execution(tool_name: str, adapter_func, ctx: Context, **kwargs):
     """Generic handler for tool execution with comprehensive request/response logging"""
@@ -214,6 +165,132 @@ async def handle_tool_execution(tool_name: str, adapter_func, ctx: Context, **kw
     try:
         # Extract session ID using biap-client patterns
         session_id = extract_session_from_context(ctx, **kwargs)
+        
+        # Session-first authentication enforcement
+        userId = kwargs.get('userId')
+        deviceId = kwargs.get('deviceId')
+        
+        if tool_name == 'initialize_shopping':
+            # Initialize: require credentials, allow session_id for updates
+            if not (userId and deviceId):
+                return json.dumps({
+                    "success": False, 
+                    "error": "CREDENTIALS_REQUIRED",
+                    "message": "initialize_shopping requires both userId and deviceId parameters",
+                    "required_params": ["userId", "deviceId"]
+                }, indent=2)
+            # Credentials are valid, proceed with initialization (with or without session_id)
+            # The adapter function will handle both new session creation and existing session updates
+        
+        elif tool_name in ['get_session_info']:
+            # Session info tools don't need credentials
+            pass
+            
+        else:
+            # All other tools: require session_id, forbid credentials
+            if userId or deviceId:
+                return json.dumps({
+                    "success": False,
+                    "error": "INVALID_PARAMS", 
+                    "message": f"Don't provide userId/deviceId to {tool_name} - only session_id from initialize_shopping",
+                    "required_action": "initialize_shopping(userId='...', deviceId='...') first, then use session_id"
+                }, indent=2)
+            
+            if not session_id:
+                return json.dumps({
+                    "success": False,
+                    "error": "SESSION_REQUIRED",
+                    "message": f"{tool_name} requires session_id. Call initialize_shopping(userId='...', deviceId='...') first",
+                    "required_action": "initialize_shopping"
+                }, indent=2)
+            
+            # Validate session exists and load credentials - ENHANCED DEBUG
+            from src.adapters.utils import get_persistent_session
+            try:
+                logger.info(f"[SESSION LOAD] Loading session {session_id[:16]}... for tool {tool_name}")
+                session_obj, _ = get_persistent_session(session_id, tool_name=tool_name)
+                
+                # ⚠️ FIX: Check for LLM session ID corruption (hex digits → letters)
+                if not session_obj:
+                    logger.warning(f"[SESSION FIX] Session not found, checking for LLM corruption: {session_id}")
+                    
+                    # Common LLM corruptions: 906→9G7, d0f→d0F, a5b→a5B, etc.
+                    from src.services.session_service import get_session_service
+                    session_service = get_session_service()
+                    
+                    # Try to find existing sessions with similar pattern
+                    import os
+                    session_files = os.listdir(session_service.storage_path)
+                    corrected_id = None
+                    
+                    for session_file in session_files:
+                        if session_file.endswith('.json'):
+                            file_session_id = session_file[:-5]  # Remove .json
+                            
+                            # Check if this could be the corrupted version
+                            if len(file_session_id) == len(session_id):
+                                # Compare character by character, allowing hex digit corrections
+                                diff_count = 0
+                                correction_made = False
+                                
+                                for i, (orig, corrupted) in enumerate(zip(file_session_id, session_id)):
+                                    if orig != corrupted:
+                                        diff_count += 1
+                                        # Check common hex corruption patterns
+                                        if (orig in '0123456789abcdef' and corrupted in 'G-Z' and 
+                                            abs(ord(orig) - ord(corrupted.lower())) <= 10):
+                                            correction_made = True
+                                
+                                # If only a few characters differ and they look like hex corruption
+                                if diff_count <= 3 and correction_made:
+                                    corrected_id = file_session_id
+                                    logger.info(f"[SESSION FIX] Found potential match: {corrected_id}")
+                                    break
+                    
+                    # Try loading with corrected ID
+                    if corrected_id:
+                        logger.info(f"[SESSION FIX] Attempting to load corrected session: {corrected_id}")
+                        session_obj, _ = get_persistent_session(corrected_id, tool_name=tool_name)
+                        if session_obj:
+                            logger.info(f"[SESSION FIX] ✅ Successfully loaded corrected session: {corrected_id}")
+                            # Update the session_id variable for subsequent use
+                            session_id = corrected_id
+                
+                if not session_obj:
+                    logger.error(f"[SESSION LOAD] Session object is None for {session_id[:16]}...")
+                    return json.dumps({
+                        "success": False,
+                        "error": "INVALID_SESSION",
+                        "message": f"Session '{session_id}' not found. Call initialize_shopping(userId='...', deviceId='...') first",
+                        "required_action": "initialize_shopping"
+                    }, indent=2)
+                
+                # ENHANCED DEBUG: Log loaded session state
+                logger.info(f"[SESSION LOAD] Session loaded - user_id={session_obj.user_id}, device_id={session_obj.device_id[:8] if session_obj.device_id else None}...")
+                logger.info(f"[SESSION LOAD] Session auth state - user_authenticated={session_obj.user_authenticated}")
+                
+                if not (session_obj.user_id and session_obj.device_id):
+                    logger.error(f"[SESSION LOAD] Session validation failed - user_id={'SET' if session_obj.user_id else 'MISSING'}, device_id={'SET' if session_obj.device_id else 'MISSING'}")
+                    return json.dumps({
+                        "success": False,
+                        "error": "INVALID_SESSION",
+                        "message": "Session missing credentials. Call initialize_shopping(userId='...', deviceId='...') first",
+                        "required_action": "initialize_shopping"
+                    }, indent=2)
+                
+                # Auto-inject stored credentials from session
+                kwargs['userId'] = session_obj.user_id
+                kwargs['deviceId'] = session_obj.device_id
+                logger.info(f"[{tool_name}] Using session {session_id[:16]}... - credentials: userId={session_obj.user_id[:8]}..., deviceId={session_obj.device_id[:8]}...")
+                
+            except Exception as e:
+                logger.error(f"[{tool_name}] Session validation failed: {e}")
+                return json.dumps({
+                    "success": False,
+                    "error": "SESSION_ERROR",
+                    "message": f"Session validation failed: {str(e)}. Call initialize_shopping(userId='...', deviceId='...') first",
+                    "required_action": "initialize_shopping"
+                }, indent=2)
         
         # Log comprehensive request information
         request_data = {
@@ -300,9 +377,7 @@ def create_standard_tool(name: str, adapter_func, docstring: str, extra_params: 
     # Define the standard parameters that all tools have
     standard_params = {
         'ctx': 'Context',
-        'userId': 'Optional[str] = "guestUser"',
-        'deviceId': 'Optional[str] = None',
-        'session_id': 'Optional[str] = None'
+        'session_id': 'str'  # Required for all tools except initialize_shopping
     }
     
     # Merge with extra params if provided
@@ -328,82 +403,107 @@ def create_standard_tool(name: str, adapter_func, docstring: str, extra_params: 
 async def add_to_cart(
     ctx: Context,
     item: Dict[str, Any],
-    quantity: int = 1,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str,
+    quantity: int = 1
 ) -> str:
-    """Add an item to the shopping cart.
+    """🤖 INTELLIGENT ADD TO CART - Supports smart product selection.
     
-    Compatible with biap-client-node-js cart patterns.
-    Supports both guest and authenticated user sessions.
+    **Intelligent Workflow Support:**
+    - Accepts complete product objects from search results
+    - Can auto-select from recent search history when item is incomplete
+    - Provides enhanced responses for smart selections
+    
+    **Usage Patterns:**
+    1. Direct: add_to_cart(item=full_product_object, session_id=session)
+    2. Smart: add_to_cart(item=partial_data, session_id=session) → auto-selects from recent search
+    
+    **Parameters:**
+    - item: Product object (complete or partial for smart selection)
+    - session_id: Session from initialize_shopping
+    - quantity: Number of items to add (default: 1)
+    
+    **Returns:** Enhanced response with smart selection indicators when applicable
+    
+    If you get SESSION_REQUIRED error:
+    Call initialize_shopping(userId='...', deviceId='...') first
     """
     return await handle_tool_execution("add_to_cart", cart_add_adapter, ctx, 
-                                     item=item, quantity=quantity, userId=userId, 
-                                     deviceId=deviceId, session_id=session_id)
+                                     item=item, quantity=quantity, session_id=session_id)
 
 @mcp.tool()
 async def view_cart(
     ctx: Context,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """View all items in the shopping cart.
+    """View all items in the shopping cart. Use for requests like:
+    - "show me my cart"
+    - "view cart" 
+    - "what's in my cart?"
+    - "check cart contents"
+    - "display cart items"
     
-    Returns cart contents with product details and totals.
+    Returns detailed cart contents with item names, quantities, prices, and totals.
+    
+    Requires session_id from initialize_shopping.
+    
+    If you get SESSION_REQUIRED error:
+    Call initialize_shopping(userId='...', deviceId='...') first
     """
     return await handle_tool_execution("view_cart", cart_view_adapter, ctx,
-                                     userId=userId, deviceId=deviceId, session_id=session_id)
-
-@mcp.tool() 
-async def update_cart_quantity(
-    ctx: Context,
-    item_id: str,
-    quantity: int,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
-) -> str:
-    """Update the quantity of an item in the cart."""
-    return await handle_tool_execution("update_cart_quantity", cart_update_adapter, ctx,
-                                     item_id=item_id, quantity=quantity, userId=userId,
-                                     deviceId=deviceId, session_id=session_id)
-
-@mcp.tool()
-async def remove_from_cart(
-    ctx: Context,
-    item_id: str,
-    userId: Optional[str] = "guestUser", 
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
-) -> str:
-    """Remove an item from the shopping cart."""
-    return await handle_tool_execution("remove_from_cart", cart_remove_adapter, ctx,
-                                     item_id=item_id, userId=userId, deviceId=deviceId,
                                      session_id=session_id)
+
+# COMMENTED OUT - User requested simplification to reduce tool complexity
+# @mcp.tool() 
+# async def update_cart_quantity(
+#     ctx: Context,
+#     item_id: str,
+#     quantity: int,
+#     session_id: str
+# ) -> str:
+#     """Update the quantity of an item in the cart.
+#     
+#     Requires initialized session from initialize_shopping.
+#     """
+#     return await handle_tool_execution("update_cart_quantity", cart_update_adapter, ctx,
+#                                      item_id=item_id, quantity=quantity, session_id=session_id)
+
+# COMMENTED OUT - User requested simplification to reduce tool complexity  
+# @mcp.tool()
+# async def remove_from_cart(
+#     ctx: Context,
+#     item_id: str,
+#     session_id: str
+# ) -> str:
+#     """Remove an item from the shopping cart.
+#     
+#     Requires initialized session from initialize_shopping.
+#     """
+#     return await handle_tool_execution("remove_from_cart", cart_remove_adapter, ctx,
+#                                      item_id=item_id, session_id=session_id)
 
 @mcp.tool()
 async def clear_cart(
     ctx: Context,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Clear all items from the shopping cart."""
+    """Clear all items from the shopping cart.
+    
+    Requires initialized session from initialize_shopping.
+    """
     return await handle_tool_execution("clear_cart", cart_clear_adapter, ctx,
-                                     userId=userId, deviceId=deviceId, session_id=session_id)
+                                     session_id=session_id)
 
 @mcp.tool()
 async def get_cart_total(
     ctx: Context,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Get the total price of items in the cart."""
+    """Get the total price of items in the cart.
+    
+    Requires initialized session from initialize_shopping.
+    """
     return await handle_tool_execution("get_cart_total", cart_total_adapter, ctx,
-                                     userId=userId, deviceId=deviceId, session_id=session_id)
+                                     session_id=session_id)
 
 # ============================================================================
 # SEARCH OPERATIONS - FastMCP Tools  
@@ -413,44 +513,54 @@ async def get_cart_total(
 async def search_products(
     ctx: Context,
     query: str,
+    session_id: str,
     category: Optional[str] = None,
     location: Optional[str] = None,
-    max_results: int = 10,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    max_results: int = 10
 ) -> str:
-    """Search for products in the ONDC network."""
+    """Search for products in the ONDC network.
+    
+    Requires session_id from initialize_shopping.
+    
+    Args:
+        query: Search term for products
+        session_id: Session ID from initialize_shopping (required)
+        category: Optional category filter
+        location: Optional location filter
+        max_results: Maximum number of results
+        
+    If you get SESSION_REQUIRED error:
+    Call initialize_shopping(userId='...', deviceId='...') first
+    """
     return await handle_tool_execution("search_products", search_adapter, ctx,
                                      query=query, category=category, location=location,
-                                     max_results=max_results, userId=userId, deviceId=deviceId,
-                                     session_id=session_id)
+                                     max_results=max_results, session_id=session_id)
 
 @mcp.tool()
 async def advanced_search(
     ctx: Context,
     filters: Dict[str, Any],
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Perform advanced product search with multiple filters."""
+    """Perform advanced product search with multiple filters.
+    
+    Requires initialized session from initialize_shopping.
+    """
     return await handle_tool_execution("advanced_search", advanced_search_adapter, ctx,
-                                     filters=filters, userId=userId, deviceId=deviceId,
-                                     session_id=session_id)
+                                     filters=filters, session_id=session_id)
 
 @mcp.tool()
 async def browse_categories(
     ctx: Context,
-    parent_category: Optional[str] = None,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str,
+    parent_category: Optional[str] = None
 ) -> str:
-    """Browse available product categories in the ONDC network."""
+    """Browse available product categories in the ONDC network.
+    
+    Requires initialized session from initialize_shopping.
+    """
     return await handle_tool_execution("browse_categories", categories_adapter, ctx,
-                                     parent_category=parent_category, userId=userId,
-                                     deviceId=deviceId, session_id=session_id)
+                                     parent_category=parent_category, session_id=session_id)
 
 # ============================================================================
 # ORDER & CHECKOUT OPERATIONS - FastMCP Tools
@@ -462,9 +572,8 @@ async def select_items_for_order(
     delivery_city: str,
     delivery_state: str,
     delivery_pincode: str,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    delivery_gps: str,
+    session_id: str
 ) -> str:
     """Get delivery quotes and options for items in cart (ONDC SELECT stage).
     
@@ -475,32 +584,31 @@ async def select_items_for_order(
         delivery_city: City name (e.g., "Bangalore")
         delivery_state: State name (e.g., "Karnataka")
         delivery_pincode: PIN code (e.g., "560001")
-        userId: User ID (default: guestUser)
-        deviceId: Device identifier
-        session_id: Session identifier
+        delivery_gps: GPS coordinates in 'latitude,longitude' format (e.g., "12.9716,77.5946")
+        session_id: Session identifier (required - from initialize_shopping)
         
     Returns:
         Delivery quotes and availability information
     """
     return await handle_tool_execution("select_items_for_order", select_items_adapter, ctx,
                                      delivery_city=delivery_city, delivery_state=delivery_state,
-                                     delivery_pincode=delivery_pincode, userId=userId, 
-                                     deviceId=deviceId, session_id=session_id)
+                                     delivery_pincode=delivery_pincode, delivery_gps=delivery_gps, session_id=session_id)
 
 @mcp.tool()
 async def initialize_order(
     ctx: Context,
     customer_name: str,
-    delivery_address: str,
+    building: str,
+    street: str, 
+    locality: str,
+    city: str,
+    state: str,
+    pincode: str,
+    delivery_gps: str,
     phone: str,
     email: str,
-    payment_method: str = "razorpay",
-    city: Optional[str] = None,
-    state: Optional[str] = None,
-    pincode: Optional[str] = None,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str,
+    payment_method: str = "razorpay"
 ) -> str:
     """Initialize order with customer and delivery details (ONDC INIT stage).
     
@@ -509,47 +617,50 @@ async def initialize_order(
     
     Args:
         customer_name: Full name of the customer
-        delivery_address: Complete street address (e.g., "123 Main St, Apt 4B")
-        phone: Contact phone number (10 digits)
+        building: Building/apartment number  
+        street: Street name
+        locality: Area/locality name
+        city: City name
+        state: State name
+        pincode: PIN/ZIP code
+        delivery_gps: GPS coordinates in "latitude,longitude" format (e.g. "12.9716,77.5946")
+        phone: Contact phone number
         email: Email address
-        payment_method: Payment type - "razorpay", "upi", "card", "netbanking" (COD not supported)
-        city: Delivery city (optional - uses SELECT stage data if not provided)
-        state: Delivery state (optional - uses SELECT stage data if not provided)
-        pincode: Delivery PIN code (optional - uses SELECT stage data if not provided)
-        userId: User ID (default: guestUser)
-        deviceId: Device identifier
-        session_id: Session identifier
+        session_id: Session ID from initialize_shopping
+        payment_method: Payment method (default: "razorpay") - cod not supported by Himira
         
     Returns:
-        Order initialization confirmation with order draft details
+        Order initialization status with next steps
     """
+    # Combine structured address into full address for backend processing
+    full_delivery_address = f"{building} {street} {locality}"
+    
     return await handle_tool_execution("initialize_order", init_order_adapter, ctx,
-                                     customer_name=customer_name, delivery_address=delivery_address,
+                                     customer_name=customer_name, delivery_address=full_delivery_address,
                                      phone=phone, email=email, payment_method=payment_method,
-                                     city=city, state=state, pincode=pincode,
-                                     userId=userId, deviceId=deviceId, session_id=session_id)
+                                     city=city, state=state, pincode=pincode, 
+                                     delivery_gps=delivery_gps, session_id=session_id)
 
 @mcp.tool()
 async def create_payment(
     ctx: Context,
     payment_method: str,
     amount: float,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Create payment for the order."""
+    """Create payment for the order.
+    
+    Requires initialized session from initialize_shopping.
+    """
     return await handle_tool_execution("create_payment", payment_adapter, ctx,
                                      payment_method=payment_method, amount=amount,
-                                     userId=userId, deviceId=deviceId, session_id=session_id)
+                                     session_id=session_id)
 
 @mcp.tool()
 async def confirm_order(
     ctx: Context,
-    payment_status: str = "PAID",
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str,
+    payment_status: str = "PAID"
 ) -> str:
     """Confirm and finalize the order (ONDC CONFIRM stage).
     
@@ -558,17 +669,14 @@ async def confirm_order(
     it can be called directly with payment_status="PAID".
     
     Args:
+        session_id: Session identifier (required - from initialize_shopping)
         payment_status: Payment status - "PAID", "PENDING", or "FAILED" (default: "PAID" for mock mode)
-        userId: User ID (default: guestUser)
-        deviceId: Device identifier
-        session_id: Session identifier
         
     Returns:
         Order confirmation with order ID and tracking information
     """
     return await handle_tool_execution("confirm_order", confirm_adapter, ctx,
-                                     payment_status=payment_status, userId=userId,
-                                     deviceId=deviceId, session_id=session_id)
+                                     payment_status=payment_status, session_id=session_id)
 
 # ============================================================================
 # SESSION MANAGEMENT - FastMCP Tools
@@ -577,27 +685,36 @@ async def confirm_order(
 @mcp.tool()
 async def initialize_shopping(
     ctx: Context,
+    userId: str,
+    deviceId: str,
     user_preferences: Optional[Dict[str, Any]] = None,
-    location: Optional[str] = None,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    location: Optional[str] = None
 ) -> str:
-    """Initialize a new shopping session."""
+    """Initialize a new shopping session with your Himira credentials.
+    
+    MANDATORY FIRST STEP: This must be called before any other shopping operations.
+    
+    Args:
+        userId: Your Himira user ID from the frontend (required)
+        deviceId: Your device ID from the frontend (required)
+        user_preferences: Optional user preferences
+        location: Optional location preference
+        
+    Returns:
+        Session information with session_id that must be used for all subsequent operations
+    """
     return await handle_tool_execution("initialize_shopping", init_session_adapter, ctx,
-                                     user_preferences=user_preferences, location=location,
-                                     userId=userId, deviceId=deviceId, session_id=session_id)
+                                     userId=userId, deviceId=deviceId, 
+                                     user_preferences=user_preferences, location=location)
 
 @mcp.tool()
 async def get_session_info(
     ctx: Context,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
     """Get current session information and status."""
     return await handle_tool_execution("get_session_info", session_info_adapter, ctx,
-                                     userId=userId, deviceId=deviceId, session_id=session_id)
+                                     session_id=session_id)
 
 # ============================================================================
 # ORDER MANAGEMENT - FastMCP Tools
@@ -608,53 +725,54 @@ async def initiate_payment(
     ctx: Context,
     order_id: str,
     payment_details: Dict[str, Any],
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Initiate payment for an existing order."""
+    """Initiate payment for an existing order.
+    
+    Requires initialized session from initialize_shopping.
+    """
     return await handle_tool_execution("initiate_payment", payment_init_adapter, ctx,
                                      order_id=order_id, payment_details=payment_details,
-                                     userId=userId, deviceId=deviceId, session_id=session_id)
+                                     session_id=session_id)
 
 @mcp.tool()
 async def confirm_order_simple(
     ctx: Context,
     order_id: str,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Confirm an order with simplified parameters."""
+    """Confirm an order with simplified parameters.
+    
+    Requires initialized session from initialize_shopping.
+    """
     return await handle_tool_execution("confirm_order_simple", confirm_simple_adapter, ctx,
-                                     order_id=order_id, userId=userId, deviceId=deviceId,
-                                     session_id=session_id)
+                                     order_id=order_id, session_id=session_id)
 
 @mcp.tool()
 async def get_order_status(
     ctx: Context,
     order_id: str,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Get the status of an existing order."""
+    """Get the status of an existing order.
+    
+    Requires initialized session from initialize_shopping.
+    """
     return await handle_tool_execution("get_order_status", order_status_adapter, ctx,
-                                     order_id=order_id, userId=userId, deviceId=deviceId,
-                                     session_id=session_id)
+                                     order_id=order_id, session_id=session_id)
 
 @mcp.tool()
 async def track_order(
     ctx: Context,
     order_id: str,
-    userId: Optional[str] = "guestUser",
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Track the delivery status of an order."""
+    """Track the delivery status of an order.
+    
+    Requires initialized session from initialize_shopping.
+    """
     return await handle_tool_execution("track_order", track_adapter, ctx,
-                                     order_id=order_id, userId=userId, deviceId=deviceId,
-                                     session_id=session_id)
+                                     order_id=order_id, session_id=session_id)
 
 # ============================================================================
 # ADDRESS MANAGEMENT - FastMCP Tools
@@ -663,53 +781,66 @@ async def track_order(
 @mcp.tool()
 async def get_delivery_addresses(
     ctx: Context,
-    userId: str,
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Get user's delivery addresses."""
+    """Get user's delivery addresses.
+    
+    Requires session_id from initialize_shopping.
+    
+    If you get SESSION_REQUIRED error:
+    Call initialize_shopping(userId='...', deviceId='...') first
+    """
     return await handle_tool_execution("get_delivery_addresses", address_get_adapter, ctx,
-                                     user_id=userId, device_id=deviceId, session_id=session_id)
+                                     session_id=session_id)
 
 @mcp.tool()
 async def add_delivery_address(
     ctx: Context,
     address_data: Dict[str, Any],
-    userId: str,
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Add new delivery address."""
+    """Add new delivery address.
+    
+    Requires session_id from initialize_shopping.
+    
+    If you get SESSION_REQUIRED error:
+    Call initialize_shopping(userId='...', deviceId='...') first
+    """
     return await handle_tool_execution("add_delivery_address", address_add_adapter, ctx,
-                                     address_data=address_data, user_id=userId, 
-                                     device_id=deviceId, session_id=session_id)
+                                     address_data=address_data, session_id=session_id)
 
 @mcp.tool()
 async def update_delivery_address(
     ctx: Context,
     address_id: str,
     address_data: Dict[str, Any],
-    userId: str,
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Update existing delivery address."""
+    """Update existing delivery address.
+    
+    Requires session_id from initialize_shopping.
+    
+    If you get SESSION_REQUIRED error:
+    Call initialize_shopping(userId='...', deviceId='...') first
+    """
     return await handle_tool_execution("update_delivery_address", address_update_adapter, ctx,
-                                     address_id=address_id, address_data=address_data,
-                                     user_id=userId, device_id=deviceId, session_id=session_id)
+                                     address_id=address_id, address_data=address_data, session_id=session_id)
 
 @mcp.tool()
 async def delete_delivery_address(
     ctx: Context,
     address_id: str,
-    userId: str,
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Delete delivery address."""
+    """Delete delivery address.
+    
+    Requires session_id from initialize_shopping.
+    
+    If you get SESSION_REQUIRED error:
+    Call initialize_shopping(userId='...', deviceId='...') first
+    """
     return await handle_tool_execution("delete_delivery_address", address_delete_adapter, ctx,
-                                     address_id=address_id, user_id=userId,
-                                     device_id=deviceId, session_id=session_id)
+                                     address_id=address_id, session_id=session_id)
 
 # ============================================================================
 # OFFER MANAGEMENT - FastMCP Tools
@@ -718,61 +849,79 @@ async def delete_delivery_address(
 @mcp.tool()
 async def get_active_offers(
     ctx: Context,
-    userId: str,
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Get active offers available to user."""
+    """Get active offers available to user.
+    
+    Requires session_id from initialize_shopping.
+    
+    If you get SESSION_REQUIRED error:
+    Call initialize_shopping(userId='...', deviceId='...') first
+    """
     return await handle_tool_execution("get_active_offers", offer_get_active_adapter, ctx,
-                                     user_id=userId, device_id=deviceId, session_id=session_id)
+                                     session_id=session_id)
 
 @mcp.tool()
 async def get_applied_offers(
     ctx: Context,
-    userId: str,
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Get offers already applied to user's cart/order."""
+    """Get offers already applied to user's cart/order.
+    
+    Requires session_id from initialize_shopping.
+    
+    If you get SESSION_REQUIRED error:
+    Call initialize_shopping(userId='...', deviceId='...') first
+    """
     return await handle_tool_execution("get_applied_offers", offer_get_applied_adapter, ctx,
-                                     user_id=userId, device_id=deviceId, session_id=session_id)
+                                     session_id=session_id)
 
 @mcp.tool()
 async def apply_offer(
     ctx: Context,
     offer_id: str,
-    userId: str,
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Apply an offer to user's cart."""
+    """Apply an offer to user's cart.
+    
+    Requires session_id from initialize_shopping.
+    
+    If you get SESSION_REQUIRED error:
+    Call initialize_shopping(userId='...', deviceId='...') first
+    """
     return await handle_tool_execution("apply_offer", offer_apply_adapter, ctx,
-                                     offer_id=offer_id, user_id=userId,
-                                     device_id=deviceId, session_id=session_id)
+                                     offer_id=offer_id, session_id=session_id)
 
 @mcp.tool()
 async def clear_offers(
     ctx: Context,
-    userId: str,
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Clear all applied offers from user's cart."""
+    """Clear all applied offers from user's cart.
+    
+    Requires session_id from initialize_shopping.
+    
+    If you get SESSION_REQUIRED error:
+    Call initialize_shopping(userId='...', deviceId='...') first
+    """
     return await handle_tool_execution("clear_offers", offer_clear_adapter, ctx,
-                                     user_id=userId, device_id=deviceId, session_id=session_id)
+                                     session_id=session_id)
 
 @mcp.tool()
 async def delete_offer(
     ctx: Context,
     offer_id: str,
-    userId: str,
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Remove a specific applied offer from user's cart."""
+    """Remove a specific applied offer from user's cart.
+    
+    Requires session_id from initialize_shopping.
+    
+    If you get SESSION_REQUIRED error:
+    Call initialize_shopping(userId='...', deviceId='...') first
+    """
     return await handle_tool_execution("delete_offer", offer_delete_adapter, ctx,
-                                     offer_id=offer_id, user_id=userId,
-                                     device_id=deviceId, session_id=session_id)
+                                     offer_id=offer_id, session_id=session_id)
 
 # ============================================================================
 # USER PROFILE MANAGEMENT - FastMCP Tools
@@ -781,37 +930,57 @@ async def delete_offer(
 @mcp.tool()
 async def get_user_profile(
     ctx: Context,
-    userId: str,
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Get user profile information."""
+    """Get user profile information.
+    
+    Requires session_id from initialize_shopping.
+    
+    If you get SESSION_REQUIRED error:
+    Call initialize_shopping(userId='...', deviceId='...') first
+    """
     return await handle_tool_execution("get_user_profile", profile_get_adapter, ctx,
-                                     user_id=userId, device_id=deviceId, session_id=session_id)
+                                     session_id=session_id)
 
 @mcp.tool()
 async def update_user_profile(
     ctx: Context,
     profile_data: Dict[str, Any],
-    userId: str,
-    deviceId: Optional[str] = None,
-    session_id: Optional[str] = None
+    session_id: str
 ) -> str:
-    """Update user profile information."""
+    """Update user profile information.
+    
+    Requires session_id from initialize_shopping.
+    
+    If you get SESSION_REQUIRED error:
+    Call initialize_shopping(userId='...', deviceId='...') first
+    """
     return await handle_tool_execution("update_user_profile", profile_update_adapter, ctx,
-                                     profile_data=profile_data, user_id=userId,
-                                     device_id=deviceId, session_id=session_id)
+                                     profile_data=profile_data, session_id=session_id)
 
 # ============================================================================
 # RESOURCES - MCP Compliance
 # ============================================================================
+
+@mcp.resource("ondc://agent-instructions")
+async def get_agent_instructions() -> str:
+    """Agent instructions for ONDC shopping - MANDATORY credential collection"""
+    try:
+        # Use os from module level
+        instructions_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mcp_agent_instructions.md")
+        if os.path.exists(instructions_path):
+            with open(instructions_path, 'r') as f:
+                return f.read()
+        return "⚠️ MANDATORY: Ask user for userId and deviceId before ANY shopping operations!"
+    except Exception as e:
+        return "🚨 CRITICAL: Always collect userId and deviceId from user first!"
 
 @mcp.resource("ondc://categories")
 async def get_categories_resource() -> str:
     """List all available ONDC product categories"""
     try:
         # Use the browse_categories adapter to get categories
-        from .adapters.search import browse_categories
+        from src.adapters.search import browse_categories
         result = await browse_categories()
         if isinstance(result, dict):
             categories = result.get("categories", [])

@@ -184,43 +184,23 @@ class FieldMapper:
 
 
 class BackendPayloadEnhancer:
-    """Enhance payloads for backend compatibility"""
+    """Simple payload enhancer - NO provider data injection"""
     
     @staticmethod
     def enhance_cart_item(item: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Enhance cart item with all required backend fields
+        Apply field mapping only - cart items already have real provider data
         
         Args:
-            item: Basic cart item
+            item: Cart item with real provider data
             
         Returns:
-            Enhanced cart item ready for backend
+            Backend-compatible item with field mapping applied
         """
-        from ..utils.himira_provider_constants import (
-            HIMIRA_BPP_ID,
-            HIMIRA_BPP_URI,
-            enrich_cart_item_with_provider
-        )
-        
-        # Apply field mapping first
+        # Only apply field name transformations
         backend_item = FieldMapper.to_backend(item)
         
-        # Enrich with provider data if missing
-        if not backend_item.get("provider"):
-            backend_item = enrich_cart_item_with_provider(backend_item)
-        
-        # Ensure critical fields
-        if not backend_item.get("bpp_id"):
-            backend_item["bpp_id"] = HIMIRA_BPP_ID
-        
-        if not backend_item.get("bpp_uri"):
-            backend_item["bpp_uri"] = HIMIRA_BPP_URI
-        
-        if not backend_item.get("contextCity"):
-            backend_item["contextCity"] = "std:0172"  # Default to Chandigarh area
-        
-        # Fix provider location structure
+        # Apply provider location structure fix (no data injection)
         backend_item = FieldMapper.apply_provider_location_fix(backend_item)
         
         return backend_item

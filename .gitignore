@@ -21,7 +21,7 @@ data/
 logs/
 sessions/
 backend/logs/
-
+/tests
 # Configuration (generated at runtime)
 backend/mcp_agent.config.yaml
 mcp_agent.config.yaml
@@ -58,3 +58,4 @@ build/
 dist/
 *.egg-info/
 Himira Order.postman_collection (2).json
+tests/journey/step1_initialize_request.json

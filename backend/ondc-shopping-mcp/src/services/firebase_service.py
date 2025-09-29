@@ -9,6 +9,7 @@ import os
 import json
 import logging
 import asyncio
+import httpx
 from typing import Dict, Optional, Tuple, Any
 from datetime import datetime, timedelta
 
@@ -90,8 +91,7 @@ class FirebaseService:
     async def _send_backend_otp(self, phone_number: str) -> Tuple[bool, str, Optional[Dict]]:
         """Call backend API to send real OTP via SMS"""
         try:
-            import httpx
-            import os
+            # Use httpx and os from module level
             
             # Get backend URL and API key from environment
             backend_url = os.getenv("BACKEND_ENDPOINT", "https://hp-buyer-backend-preprod.himira.co.in/clientApis")
@@ -153,8 +153,7 @@ class FirebaseService:
     async def _verify_backend_otp(self, phone_number: str, otp_code: str, session: Dict) -> Tuple[bool, str, Optional[Dict]]:
         """Call backend API to verify real OTP"""
         try:
-            import httpx
-            import os
+            # Use httpx and os from module level
             
             # Get backend URL and API key from environment
             backend_url = os.getenv("BACKEND_ENDPOINT", "https://hp-buyer-backend-preprod.himira.co.in/clientApis")

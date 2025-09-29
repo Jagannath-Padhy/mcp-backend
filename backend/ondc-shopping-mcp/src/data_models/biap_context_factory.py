@@ -23,37 +23,29 @@ class BiapContextFactory:
     
     def get_city_by_pincode(self, pincode: Optional[str], city: Optional[str] = None, action: Optional[str] = None) -> str:
         """
-        Get proper city code by pincode - matches BIAP Node.js implementation
+        Get city code - ALWAYS use pincode directly for ONDC compliance
         
-        CRITICAL: For Himira backend SELECT requests, always use just the pincode as city
-        This matches what the Himira documentation shows
+        CRITICAL: Backend cart data provides area_code which should be used as city
+        No conversion to std: format - use pincode directly as per working curl examples
         """
         import logging
         logger = logging.getLogger(__name__)
         
         logger.info(f"[BiapContext] get_city_by_pincode called: pincode={pincode}, city={city}, action={action}")
         
-        # For SELECT action, always use pincode directly (Himira requirement)
-        if action == 'select' and pincode:
-            logger.info(f"[BiapContext] SELECT ACTION: Using pincode as city directly: {pincode}")
+        # ALWAYS use pincode directly - no std: format conversion
+        if pincode:
+            logger.info(f"[BiapContext] Using pincode as city directly (no conversion): {pincode}")
             return pincode
         
-        # For Himira area pincodes, use just the pincode (not std: format)
-        himira_pincodes = ['140301', '140401', '140501', '160001', '160002']
-        
-        if pincode and pincode in himira_pincodes:
-            return pincode  # Return just the pincode for Himira areas
-        
-        # For other areas, use standard city code mapping
-        from ..utils.city_code_mapping import get_city_code_by_pincode, get_city_code_by_name
-        
-        if pincode:
-            return get_city_code_by_pincode(pincode)
-        elif city:
-            # Try to get by city name if pincode not available
-            return get_city_code_by_name(city)
-        else:
-            return self.city_default
+        # If no pincode provided, try city parameter
+        if city:
+            logger.info(f"[BiapContext] Using city parameter directly: {city}")
+            return city
+            
+        # Final fallback to default
+        logger.warning(f"[BiapContext] No pincode or city provided, using default: {self.city_default}")
+        return self.city_default
     
     def get_transaction_id(self, transaction_id: Optional[str] = None) -> str:
         """Get or generate transaction ID"""
@@ -65,7 +57,7 @@ class BiapContextFactory:
     def create(self, context_params: Dict) -> Dict:
         """
         Create BIAP-compatible ONDC context structure
-        Matches the Node.js ContextFactory.create() method
+        Returns simplified format for SELECT operations to match backend expectations
         
         Args:
             context_params: Dictionary containing:
@@ -80,7 +72,7 @@ class BiapContextFactory:
                 - domain: Domain override (optional)
         
         Returns:
-            BIAP-compatible ONDC context
+            Simplified context for SELECT, full context for other operations
         """
         # Extract parameters
         action = context_params.get('action', 'select')
@@ -101,7 +93,15 @@ class BiapContextFactory:
         final_city = self.get_city_by_pincode(pincode, city, action)  # Pass action for proper city formatting
         logger.info(f"[BiapContext] Final city value for {action}: {final_city}")
         
-        # Create context structure matching BIAP Node.js
+        # For SELECT operations: Return simplified context to match backend expectations
+        if action == 'select':
+            logger.info("[BiapContext] SELECT operation - returning simplified context")
+            return {
+                "domain": domain,
+                "city": final_city
+            }
+        
+        # Full ONDC context structure for other operations (init, confirm, etc.)
         context = {
             "domain": domain,
             "country": self.country,

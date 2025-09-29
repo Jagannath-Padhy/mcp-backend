@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from mcp.types import Tool
 
 # Import all adapters
-from ..mcp_adapters import (
+from src.mcp_adapters import (
     # Cart adapters
     add_to_cart as add_to_cart_adapter,
     view_cart as view_cart_adapter,
@@ -64,11 +64,24 @@ class ToolRegistry:
             description="START SHOPPING: Initialize new shopping session",
             adapter=initialize_shopping_adapter,
             parameters={
-                "session_id": {
+                "userId": {
+                    "type": "string", 
+                    "description": "Your Himira user ID from the frontend (required)"
+                },
+                "deviceId": {
                     "type": "string",
-                    "description": "Optional session ID for persistence"
+                    "description": "Your device ID from the frontend (required)" 
+                },
+                "user_preferences": {
+                    "type": "object",
+                    "description": "Optional user preferences"
+                },
+                "location": {
+                    "type": "string",
+                    "description": "Optional location preference"
                 }
             },
+            required_params=["userId", "deviceId"],
             category="session"
         ))
         
@@ -219,6 +232,7 @@ class ToolRegistry:
                 "delivery_city": {"type": "string", "description": "Delivery city"},
                 "delivery_state": {"type": "string", "description": "Delivery state"},
                 "delivery_pincode": {"type": "string", "description": "Delivery pincode"},
+                "delivery_gps": {"type": "string", "description": "GPS coordinates in 'latitude,longitude' format (e.g., '12.9716,77.5946')"},
                 "session_id": {"type": "string", "description": "Optional session ID"}
             },
             category="order"

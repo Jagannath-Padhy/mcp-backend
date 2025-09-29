@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 import time
 
-from ..buyer_backend_client import BuyerBackendClient
+from ..buyer_backend_client import BuyerBackendClient, get_buyer_backend_client
 from ..models.session import Session
 from ..utils.logger import get_logger
 from ..utils.device_id import get_or_create_device_id
@@ -29,7 +29,7 @@ class UserService:
         Args:
             buyer_backend_client: Client for backend API calls
         """
-        self.buyer_app = buyer_backend_client or BuyerBackendClient()
+        self.buyer_app = buyer_backend_client or get_buyer_backend_client()
         self.firebase_service = get_firebase_service()  # Firebase authentication service
         
         # Store OTP state temporarily (in production, use Redis/DB)

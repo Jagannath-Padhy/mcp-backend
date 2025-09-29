@@ -115,6 +115,19 @@ class BuyerBackendClient:
             logger.info(f"[CURL DEBUG] API Call to {endpoint}")
             logger.info(f"[CURL COMMAND]:\n{curl_cmd}")
             logger.info(f"{'='*80}")
+            
+            # Also write to dedicated curl log file for easier viewing
+            try:
+                curl_log_path = "/app/logs/curl_requests.log"
+                os.makedirs(os.path.dirname(curl_log_path), exist_ok=True)
+                with open(curl_log_path, "a") as f:
+                    from datetime import datetime
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    f.write(f"\n[{timestamp}] {endpoint}\n")
+                    f.write(f"{curl_cmd}\n")
+                    f.write("-" * 80 + "\n")
+            except Exception as e:
+                logger.warning(f"Failed to write to curl log file: {e}")
         
         try:
             async with httpx.AsyncClient(timeout=self.timeout, limits=self.limits) as client:
@@ -136,11 +149,34 @@ class BuyerBackendClient:
                         logger.info(f"[CURL RESPONSE] Body:\n{json.dumps(response_json, indent=2)}")
                     except:
                         logger.info(f"[CURL RESPONSE] Body:\n{response.text[:1000]}")  # Limit size
+                    
+                    # Also write response to dedicated curl log file
+                    try:
+                        curl_log_path = "/app/logs/curl_requests.log"
+                        with open(curl_log_path, "a") as f:
+                            f.write(f"RESPONSE STATUS: {response.status_code}\n")
+                            if response.status_code != 200:
+                                f.write(f"ERROR RESPONSE: {response.text[:1000]}\n")
+                            else:
+                                try:
+                                    response_json = response.json()
+                                    f.write(f"SUCCESS RESPONSE: {json.dumps(response_json, separators=(',', ':'))[:500]}...\n")
+                                except:
+                                    f.write(f"SUCCESS RESPONSE: {response.text[:500]}\n")
+                            f.write("=" * 80 + "\n\n")
+                    except Exception as e:
+                        logger.warning(f"Failed to write response to curl log file: {e}")
                 
                 if response.status_code == 200:
                     try:
-                        return response.json()
+                        response_json = response.json()
+                        logger.info(f"[BackendClient] 🔍 Raw JSON response: {response_json}")
+                        logger.info(f"[BackendClient] 🔍 Response type: {type(response_json)}")
+                        if isinstance(response_json, list):
+                            logger.info(f"[BackendClient] 🔍 Array length: {len(response_json)}")
+                        return response_json
                     except json.JSONDecodeError:
+                        logger.info(f"[BackendClient] 🔍 JSON decode failed, returning text: {response.text}")
                         return {"success": True, "data": response.text}
                 elif response.status_code == 401:
                     logger.error(f"Unauthorized access to {endpoint}")
@@ -165,7 +201,19 @@ class BuyerBackendClient:
                     return {"error": f"HTTP {response.status_code}", "details": response.text}
                     
         except Exception as e:
-            logger.error(f"Request failed for {endpoint}: {e}")
+            logger.error(f"Request failed for {endpoint}: {type(e).__name__}: {e}")
+            # Enhanced error details for timeout/connection issues
+            if "timeout" in str(e).lower() or "read timeout" in str(e).lower():
+                logger.error(f"TIMEOUT ERROR: Backend took too long to respond to {endpoint}")
+            elif "connection" in str(e).lower():
+                logger.error(f"CONNECTION ERROR: Failed to connect to backend for {endpoint}")
+            
+            # Log request details for debugging
+            if json_data:
+                logger.error(f"Request payload that failed: {json.dumps(json_data, indent=2)[:500]}...")
+            if params:
+                logger.error(f"Request params that failed: {params}")
+            
             return {"error": str(e)}
     
     # ================================
@@ -266,11 +314,26 @@ class BuyerBackendClient:
     
     async def add_to_cart(self, user_id: str, device_id: str, cart_data: Dict) -> Optional[Dict]:
         """Add item to cart"""
-        return await self._make_request("POST", f"/v2/cart/{user_id}/{device_id}", json_data=cart_data)
+        logger.info(f"[BackendClient] 🛒 ADD TO CART API CALL")
+        logger.info(f"[BackendClient] 🎯 Endpoint: POST /v2/cart/{user_id}/{device_id}")
+        logger.info(f"[BackendClient] 📦 Payload: {json.dumps(cart_data, indent=2)}")
+        
+        result = await self._make_request("POST", f"/v2/cart/{user_id}/{device_id}", json_data=cart_data)
+        
+        logger.info(f"[BackendClient] 📥 ADD TO CART Response:")
+        logger.info(f"[BackendClient] {json.dumps(result, indent=2) if result else 'None'}")
+        return result
     
     async def get_cart(self, user_id: str, device_id: str) -> Optional[Dict]:
         """Get cart contents"""
-        return await self._make_request("GET", f"/v2/cart/{user_id}/{device_id}")
+        logger.info(f"[BackendClient] 👁️ GET CART API CALL")
+        logger.info(f"[BackendClient] 🎯 Endpoint: GET /v2/cart/{user_id}/{device_id}")
+        
+        result = await self._make_request("GET", f"/v2/cart/{user_id}/{device_id}")
+        
+        logger.info(f"[BackendClient] 📥 GET CART Response:")
+        logger.info(f"[BackendClient] {json.dumps(result, indent=2) if result else 'None'}")
+        return result
     
     async def update_cart_item(self, user_id: str, item_id: str, update_data: Dict) -> Optional[Dict]:
         """Update cart item"""
@@ -339,7 +402,8 @@ class BuyerBackendClient:
         return result
     
     async def get_select_response(self, **params) -> Optional[Dict]:
-        """Get select response data"""
+        """Get select response data - wil-api-key should be included by default"""
+        # The _make_request method already includes wil-api-key header by default
         return await self._make_request("GET", "/v2/on_select", params=params)
     
     async def get_select_data_by_message_id(self, message_id: str) -> Optional[Dict]:
@@ -347,9 +411,14 @@ class BuyerBackendClient:
         return await self._make_request("GET", f"/v2/select/Data/{message_id}")
     
     async def initialize_order(self, init_data: Dict, auth_token: Optional[str] = None) -> Optional[Dict]:
-        """ONDC Init: Initialize order"""
+        """ONDC Init: Initialize order
+        
+        Note: Himira backend expects array format for INIT requests: [{...}]
+        """
+        # Wrap init_data in array format as required by Himira backend
+        array_payload = [init_data]
         return await self._make_request("POST", "/v2/initialize_order", 
-                                      json_data=init_data, auth_token=auth_token, require_auth=False)
+                                      json_data=array_payload, auth_token=auth_token, require_auth=False)
     
     async def get_init_response(self, auth_token: Optional[str] = None, **params) -> Optional[Dict]:
         """Get init response"""
@@ -425,13 +494,8 @@ class BuyerBackendClient:
     # USER/ACCOUNT APIs
     # ================================
     
-    async def create_guest_user(self, guest_data: Dict) -> Optional[Dict]:
-        """Create guest user"""
-        return await self._make_request("POST", "/create/guest/user", json_data=guest_data)
-    
-    async def guest_user_login(self, login_data: Dict) -> Optional[Dict]:
-        """Guest user login"""
-        return await self._make_request("POST", "/guestUserLogin", json_data=login_data)
+    # REMOVED: Guest user endpoints - No more guest mode
+    # All users must use real Himira credentials
     
     async def signup(self, signup_data: Dict) -> Optional[Dict]:
         """Send OTP for phone registration - matches frontend flow"""
@@ -586,9 +650,13 @@ class BuyerBackendClient:
 _buyer_client: Optional[BuyerBackendClient] = None
 
 
-def get_buyer_backend_client(base_url: str = None, api_key: str = None) -> BuyerBackendClient:
-    """Get singleton BuyerBackendClient instance"""
+def get_buyer_backend_client(base_url: str = None, api_key: str = None, debug_curl: bool = None) -> BuyerBackendClient:
+    """Get singleton BuyerBackendClient instance with debug CURL logging enabled by default"""
     global _buyer_client
     if _buyer_client is None:
-        _buyer_client = BuyerBackendClient(base_url, api_key)
+        # Enable debug CURL logging by default for troubleshooting
+        if debug_curl is None:
+            debug_curl = os.getenv("DEBUG_CURL_LOGGING", "true").lower() == "true"
+        _buyer_client = BuyerBackendClient(base_url, api_key, debug_curl=debug_curl)
+        logger.info(f"Singleton BuyerBackendClient created with debug_curl={debug_curl}")
     return _buyer_client
