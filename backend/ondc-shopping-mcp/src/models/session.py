@@ -177,6 +177,7 @@ class Session:
     preferences: UserPreferences = field(default_factory=UserPreferences)
     history: List[Dict[str, Any]] = field(default_factory=list)
     search_history: List[Dict[str, Any]] = field(default_factory=list)
+    # REMOVED: cart_cache workaround - now using only real backend data
     created_at: datetime = field(default_factory=datetime.utcnow)
     last_accessed: datetime = field(default_factory=datetime.utcnow)
     
@@ -209,6 +210,7 @@ class Session:
             'preferences': self.preferences.to_dict(),
             'history': self.history,
             'search_history': self.search_history,
+            # REMOVED: cart_cache - now using only real backend data
             'created_at': self.created_at.isoformat(),
             'last_accessed': self.last_accessed.isoformat(),
             'auth_token': self.auth_token,
@@ -229,6 +231,7 @@ class Session:
             preferences=UserPreferences.from_dict(data.get('preferences', {})),
             history=data.get('history', []),
             search_history=data.get('search_history', []),
+            # REMOVED: cart_cache - now using only real backend data
             created_at=datetime.fromisoformat(data['created_at']) if 'created_at' in data else datetime.utcnow(),
             last_accessed=datetime.fromisoformat(data['last_accessed']) if 'last_accessed' in data else datetime.utcnow(),
             auth_token=data.get('auth_token'),

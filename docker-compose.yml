@@ -41,6 +41,8 @@ services:
       # Guest User Configuration
       - GUEST_USER_ID=guestUser
       - GUEST_DEVICE_ID=d58dc5e2119ae5430b9321602618c878
+      # Mock Mode Configuration (easily removable for production)
+      - MOCK_AFTER_INIT=true
       # Supervisor Web Interface Configuration
       - SUPERVISOR_WEB_ENABLED=${SUPERVISOR_WEB_ENABLED:-true}
       - SUPERVISOR_WEB_PORT=${SUPERVISOR_WEB_PORT:-9001}

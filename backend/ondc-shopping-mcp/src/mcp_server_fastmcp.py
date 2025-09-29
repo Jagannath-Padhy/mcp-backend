@@ -51,8 +51,8 @@ from src.adapters.utils import (
 from src.adapters.cart import (
     add_to_cart as cart_add_adapter,
     view_cart as cart_view_adapter,
-    remove_from_cart as cart_remove_adapter,
-    update_cart_quantity as cart_update_adapter,
+    # remove_from_cart as cart_remove_adapter,  # COMMENTED OUT - User requested simplification
+    # update_cart_quantity as cart_update_adapter,  # COMMENTED OUT - User requested simplification
     clear_cart as cart_clear_adapter,
     get_cart_total as cart_total_adapter
 )
@@ -204,12 +204,60 @@ async def handle_tool_execution(tool_name: str, adapter_func, ctx: Context, **kw
                     "required_action": "initialize_shopping"
                 }, indent=2)
             
-            # Validate session exists and load credentials
+            # Validate session exists and load credentials - ENHANCED DEBUG
             from src.adapters.utils import get_persistent_session
             try:
+                logger.info(f"[SESSION LOAD] Loading session {session_id[:16]}... for tool {tool_name}")
                 session_obj, _ = get_persistent_session(session_id, tool_name=tool_name)
                 
+                # ⚠️ FIX: Check for LLM session ID corruption (hex digits → letters)
                 if not session_obj:
+                    logger.warning(f"[SESSION FIX] Session not found, checking for LLM corruption: {session_id}")
+                    
+                    # Common LLM corruptions: 906→9G7, d0f→d0F, a5b→a5B, etc.
+                    from src.services.session_service import get_session_service
+                    session_service = get_session_service()
+                    
+                    # Try to find existing sessions with similar pattern
+                    import os
+                    session_files = os.listdir(session_service.storage_path)
+                    corrected_id = None
+                    
+                    for session_file in session_files:
+                        if session_file.endswith('.json'):
+                            file_session_id = session_file[:-5]  # Remove .json
+                            
+                            # Check if this could be the corrupted version
+                            if len(file_session_id) == len(session_id):
+                                # Compare character by character, allowing hex digit corrections
+                                diff_count = 0
+                                correction_made = False
+                                
+                                for i, (orig, corrupted) in enumerate(zip(file_session_id, session_id)):
+                                    if orig != corrupted:
+                                        diff_count += 1
+                                        # Check common hex corruption patterns
+                                        if (orig in '0123456789abcdef' and corrupted in 'G-Z' and 
+                                            abs(ord(orig) - ord(corrupted.lower())) <= 10):
+                                            correction_made = True
+                                
+                                # If only a few characters differ and they look like hex corruption
+                                if diff_count <= 3 and correction_made:
+                                    corrected_id = file_session_id
+                                    logger.info(f"[SESSION FIX] Found potential match: {corrected_id}")
+                                    break
+                    
+                    # Try loading with corrected ID
+                    if corrected_id:
+                        logger.info(f"[SESSION FIX] Attempting to load corrected session: {corrected_id}")
+                        session_obj, _ = get_persistent_session(corrected_id, tool_name=tool_name)
+                        if session_obj:
+                            logger.info(f"[SESSION FIX] ✅ Successfully loaded corrected session: {corrected_id}")
+                            # Update the session_id variable for subsequent use
+                            session_id = corrected_id
+                
+                if not session_obj:
+                    logger.error(f"[SESSION LOAD] Session object is None for {session_id[:16]}...")
                     return json.dumps({
                         "success": False,
                         "error": "INVALID_SESSION",
@@ -217,7 +265,12 @@ async def handle_tool_execution(tool_name: str, adapter_func, ctx: Context, **kw
                         "required_action": "initialize_shopping"
                     }, indent=2)
                 
+                # ENHANCED DEBUG: Log loaded session state
+                logger.info(f"[SESSION LOAD] Session loaded - user_id={session_obj.user_id}, device_id={session_obj.device_id[:8] if session_obj.device_id else None}...")
+                logger.info(f"[SESSION LOAD] Session auth state - user_authenticated={session_obj.user_authenticated}")
+                
                 if not (session_obj.user_id and session_obj.device_id):
+                    logger.error(f"[SESSION LOAD] Session validation failed - user_id={'SET' if session_obj.user_id else 'MISSING'}, device_id={'SET' if session_obj.device_id else 'MISSING'}")
                     return json.dumps({
                         "success": False,
                         "error": "INVALID_SESSION",
@@ -353,9 +406,23 @@ async def add_to_cart(
     session_id: str,
     quantity: int = 1
 ) -> str:
-    """Add an item to the shopping cart.
+    """🤖 INTELLIGENT ADD TO CART - Supports smart product selection.
     
-    Requires session_id from initialize_shopping.
+    **Intelligent Workflow Support:**
+    - Accepts complete product objects from search results
+    - Can auto-select from recent search history when item is incomplete
+    - Provides enhanced responses for smart selections
+    
+    **Usage Patterns:**
+    1. Direct: add_to_cart(item=full_product_object, session_id=session)
+    2. Smart: add_to_cart(item=partial_data, session_id=session) → auto-selects from recent search
+    
+    **Parameters:**
+    - item: Product object (complete or partial for smart selection)
+    - session_id: Session from initialize_shopping
+    - quantity: Number of items to add (default: 1)
+    
+    **Returns:** Enhanced response with smart selection indicators when applicable
     
     If you get SESSION_REQUIRED error:
     Call initialize_shopping(userId='...', deviceId='...') first
@@ -368,7 +435,14 @@ async def view_cart(
     ctx: Context,
     session_id: str
 ) -> str:
-    """View all items in the shopping cart.
+    """View all items in the shopping cart. Use for requests like:
+    - "show me my cart"
+    - "view cart" 
+    - "what's in my cart?"
+    - "check cart contents"
+    - "display cart items"
+    
+    Returns detailed cart contents with item names, quantities, prices, and totals.
     
     Requires session_id from initialize_shopping.
     
@@ -378,32 +452,34 @@ async def view_cart(
     return await handle_tool_execution("view_cart", cart_view_adapter, ctx,
                                      session_id=session_id)
 
-@mcp.tool() 
-async def update_cart_quantity(
-    ctx: Context,
-    item_id: str,
-    quantity: int,
-    session_id: str
-) -> str:
-    """Update the quantity of an item in the cart.
-    
-    Requires initialized session from initialize_shopping.
-    """
-    return await handle_tool_execution("update_cart_quantity", cart_update_adapter, ctx,
-                                     item_id=item_id, quantity=quantity, session_id=session_id)
+# COMMENTED OUT - User requested simplification to reduce tool complexity
+# @mcp.tool() 
+# async def update_cart_quantity(
+#     ctx: Context,
+#     item_id: str,
+#     quantity: int,
+#     session_id: str
+# ) -> str:
+#     """Update the quantity of an item in the cart.
+#     
+#     Requires initialized session from initialize_shopping.
+#     """
+#     return await handle_tool_execution("update_cart_quantity", cart_update_adapter, ctx,
+#                                      item_id=item_id, quantity=quantity, session_id=session_id)
 
-@mcp.tool()
-async def remove_from_cart(
-    ctx: Context,
-    item_id: str,
-    session_id: str
-) -> str:
-    """Remove an item from the shopping cart.
-    
-    Requires initialized session from initialize_shopping.
-    """
-    return await handle_tool_execution("remove_from_cart", cart_remove_adapter, ctx,
-                                     item_id=item_id, session_id=session_id)
+# COMMENTED OUT - User requested simplification to reduce tool complexity  
+# @mcp.tool()
+# async def remove_from_cart(
+#     ctx: Context,
+#     item_id: str,
+#     session_id: str
+# ) -> str:
+#     """Remove an item from the shopping cart.
+#     
+#     Requires initialized session from initialize_shopping.
+#     """
+#     return await handle_tool_execution("remove_from_cart", cart_remove_adapter, ctx,
+#                                      item_id=item_id, session_id=session_id)
 
 @mcp.tool()
 async def clear_cart(

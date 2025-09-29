@@ -97,10 +97,19 @@ async def initialize_shopping(userId: str,
             f"Ready to shop! What would you like to find?"
         )
         
-        # Save session with configured IDs
-        logger.info(f"Saving session {session_obj.session_id[:8]}... with userId={session_obj.user_id}, deviceId={session_obj.device_id[:8]}...")
+        # Save session with configured IDs - ENHANCED DEBUG
+        logger.info(f"[SESSION SAVE] About to save session {session_obj.session_id[:8]}...")
+        logger.info(f"[SESSION SAVE] Pre-save state - userId={session_obj.user_id}, deviceId={session_obj.device_id[:8] if session_obj.device_id else None}...")
+        logger.info(f"[SESSION SAVE] Pre-save auth state - user_authenticated={session_obj.user_authenticated}")
+        
+        # Debug: Check session object state before save
+        session_dict = session_obj.to_dict()
+        logger.info(f"[SESSION SAVE] Session dict keys: {list(session_dict.keys())}")
+        logger.info(f"[SESSION SAVE] Session dict user_id: {session_dict.get('user_id')}")
+        logger.info(f"[SESSION SAVE] Session dict device_id: {session_dict.get('device_id')}")
+        
         save_persistent_session(session_obj, conversation_manager)
-        logger.info(f"Session {session_obj.session_id[:8]}... saved successfully")
+        logger.info(f"[SESSION SAVE] Session {session_obj.session_id[:8]}... saved successfully")
         
         return format_mcp_response(
             True,

@@ -1,4 +1,6 @@
 {
   "message": "initialize_shopping(userId='EUSJ0ypAJJVdo3gXrUJe4uIBwDB2', deviceId='ed0bda0dd8c167a73721be5bb142dfc9')",
-  "session_id": null
+  "method": "POST",
+  "url": "http://localhost:8001/api/v1/chat",
+  "extracted_session_id": "session_fede93addafd4bcdb819c291fbcf8bb5"
 }

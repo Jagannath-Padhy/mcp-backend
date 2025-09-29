@@ -6,6 +6,7 @@ import uuid
 import json
 import asyncio
 import time
+import os
 
 from ..models.session import Session, CheckoutState, CheckoutStage, DeliveryInfo
 from ..models.ondc_payload_models import (
@@ -1212,7 +1213,8 @@ Ready to proceed with order initialization!"""
                 }
             }
             
-            # Step 11.1: Create Himira-format INIT request (matching working curl exactly)
+            # Step 11.1: Create ONDC-compliant INIT request (matching exact ONDC specification)
+            # ✅ FIXED: Remove 'order' wrapper - ONDC expects message.items directly
             init_data = {
                 'context': {
                     'transaction_id': session.checkout_state.transaction_id,
@@ -1220,7 +1222,7 @@ Ready to proceed with order initialization!"""
                     'domain': 'ONDC:RET10'  # Standard ONDC retail domain
                 },
                 'message': {
-                    'items': init_items,  # Items at root of message (not under order)
+                    'items': init_items,  # ✅ FIXED: Direct under message, not message.order
                     'billing_info': {
                         'address': {
                             'name': customer_name,
@@ -1266,6 +1268,7 @@ Ready to proceed with order initialization!"""
             logger.info(f"  - Items Count: {len(init_data['message']['items'])}")
             logger.info(f"  - Device ID: {init_data['deviceId']}")
             logger.info(f"  - City: {init_data['context']['city']}")
+            logger.info(f"  - Structure: message.items (ONDC compliant, not message.order)")
             
             # Log the complete INIT payload for debugging
             logger.debug(f"[INIT] 📤 Complete INIT payload:")
@@ -1363,13 +1366,18 @@ Ready to proceed with order initialization!"""
             logger.debug(f"[CheckoutService] Final INIT response after polling: {json.dumps(result, indent=2) if result else 'None'}")
             
             if result and result.get('success', True) and 'error' not in result:
+                # INIT step only confirms availability and pricing (ONDC spec)
+                # Order ID is generated later during CONFIRM step, not here
+                logger.info("[CheckoutService] INIT successful - order ready for confirmation")
+                
                 # Update session to INIT stage  
                 session.checkout_state.stage = CheckoutStage.INIT
                 session.add_to_history('initialize_order', {
                     'address': delivery_address,
                     'phone': phone,
                     'email': email,
-                    'payment_method': payment_method
+                    'payment_method': payment_method,
+                    'init_successful': True
                 })
                 
                 return {
@@ -1425,8 +1433,16 @@ Ready to proceed with order initialization!"""
             cart_summary = await self.cart_service.get_cart_summary(session)
             total_amount = cart_summary['total_value']
             
-            # MOCK PAYMENT CREATION - Using values from Himira Order Postman Collection
-            if config.payment.mock_mode:
+            # MOCK PAYMENT CREATION - Only if MOCK_AFTER_INIT is enabled
+            mock_after_init_env = os.getenv('MOCK_AFTER_INIT', 'false')
+            mock_after_init = mock_after_init_env.lower() == 'true'
+            
+            # 🔥 DEBUG: Log environment variable status
+            logger.error(f"[PAYMENT DEBUG] MOCK_AFTER_INIT env var: '{mock_after_init_env}'")
+            logger.error(f"[PAYMENT DEBUG] Mock after init enabled: {mock_after_init}")
+            logger.error(f"[PAYMENT DEBUG] Config payment mock mode: {config.payment.mock_mode}")
+            
+            if mock_after_init or config.payment.mock_mode:
                 logger.info(f"[MOCK PAYMENT CREATION] Creating mock payment for amount: {total_amount}")
                 
                 # Create mock Razorpay order
@@ -1596,8 +1612,9 @@ Ready to proceed with order initialization!"""
             # Step 7: Create payment object with MOCK values - TESTING ONLY
             total_amount = cart_summary['total_value']
             
-            # MOCK PAYMENT IMPLEMENTATION - Using values from Himira Order Postman Collection
-            if config.payment.mock_mode:
+            # PAYMENT OBJECT CREATION - Only mock if PAYMENT_MOCK_MODE is enabled
+            payment_mock_mode = os.getenv('PAYMENT_MOCK_MODE', 'false').lower() == 'true'
+            if config.payment.mock_mode or payment_mock_mode:
                 logger.info(f"[MOCK PAYMENT] Creating mock payment for amount: {total_amount}")
                 payment_obj = mock_payment_service.create_biap_payment_object(total_amount)
                 
@@ -1606,8 +1623,8 @@ Ready to proceed with order initialization!"""
                     logger.info(f"[MOCK PAYMENT] Settlement basis: {payment_obj['@ondc/org/settlement_basis']}")
                     logger.info(f"[MOCK PAYMENT] Settlement window: {payment_obj['@ondc/org/settlement_window']}")
             else:
-                # Real payment implementation (disabled for now)
-                logger.warning("[REAL PAYMENT] Real payment mode not implemented yet")
+                # Real payment implementation for CONFIRM step
+                logger.info("[REAL PAYMENT] Creating real payment object for CONFIRM")
                 payment_obj = {
                     'type': 'ON-ORDER',
                     'collected_by': 'BAP', 
@@ -1684,15 +1701,26 @@ Ready to proceed with order initialization!"""
                         'message': ' Authentication required for real orders. Please login first.'
                     }
             
-            # In mock mode, simulate the confirmation
-            if config.payment.mock_mode and not auth_token:
-                logger.info("[CheckoutService] MOCK CONFIRM - Simulating order confirmation")
+            # MOCK AFTER INIT: Mock payment and confirm steps after real INIT
+            mock_after_init = os.getenv('MOCK_AFTER_INIT', 'false').lower() == 'true'
+            if mock_after_init:
+                logger.info(f"[CheckoutService] MOCK CONFIRM ONLY - Simulating final order confirmation step (rest of journey was real)")
+                logger.info(f"[CheckoutService] Real ONDC flow completed: SEARCH → CART → SELECT → INIT → [MOCK CONFIRM]")
+                
+                # Generate order_id for mock confirmation (INIT doesn't provide order_id per ONDC spec)
+                mock_order_id = self._generate_order_id()
+                
                 # Create mock confirmation response
                 result = {
                     'success': True,
-                    'order_id': f"MOCK_ORDER_{session.checkout_state.transaction_id[:8].upper()}",
-                    'message': '[MOCK] Order confirmed successfully'
+                    'order_id': mock_order_id,
+                    'message': f'🎉 Order confirmed successfully! Order ID: {mock_order_id} (Mock confirmation - real ONDC journey completed through INIT)',
+                    'mock_confirm': True,
+                    'real_journey_completed': ['SEARCH', 'CART', 'SELECT', 'INIT'],
+                    'note': 'Order ID generated for mock CONFIRM since INIT step only confirms pricing per ONDC spec'
                 }
+                logger.info(f"[CheckoutService] Generated mock order_id for CONFIRM: {mock_order_id}")
+                logger.info("[CheckoutService] Note: INIT step correctly does not provide order_id (per ONDC specification)")
             else:
                 confirm_response = await self.buyer_app.confirm_order(confirm_data, auth_token=auth_token)
                 

@@ -3,6 +3,8 @@
 from typing import Dict, List, Optional, Any, Tuple
 import logging
 import json
+import asyncio
+from datetime import datetime
 
 from ..models.session import Session
 from ..buyer_backend_client import BuyerBackendClient, get_buyer_backend_client
@@ -60,9 +62,14 @@ class CartService:
             logger.info(f"[Cart] 🛒 ADD TO CART OPERATION STARTED")
             logger.info(f"[Cart] 👤 User ID: {user_id}")
             logger.info(f"[Cart] 📱 Device ID: {device_id}")
+            logger.info(f"[Cart] 🏷️  Session ID: {session.session_id}")
             logger.info(f"[Cart] 🏷️  Item: {product_name}")
             logger.info(f"[Cart] 🏪 Provider: {provider_id}")
             logger.info(f"[Cart] 🔢 Quantity: {quantity}")
+            
+            # 🚨 CRITICAL DEBUG: Log the exact backend URL and parameters
+            logger.error(f"[CART DEBUG] ADD_TO_CART - Session: {session.session_id}, User: {user_id}, Device: {device_id}")
+            logger.error(f"[CART DEBUG] FULL URL: https://hp-buyer-backend-preprod.himira.co.in/clientApis/v2/cart/{user_id}/{device_id}")
             
             # Create cart payload matching exact backend format
             cart_payload = self._create_backend_cart_payload(product, quantity)
@@ -79,15 +86,12 @@ class CartService:
             logger.info(f"[Cart] 📥 Backend ADD response:")
             logger.info(f"[Cart] {json.dumps(result, indent=2) if result else 'None'}")
             
-            if result and not result.get('error'):
+            # ✅ SIMPLE AND CLEAN: Trust backend response directly
+            if result and result.get('status') == 'success':
                 product_name = product.get('name', 'Unknown Product')
-                logger.info(f"[Cart] ✅ Successfully added {product_name} to backend cart")
-                
-                # WORKAROUND: Since backend GET cart API returns empty despite successful POST,
-                # we'll maintain a local cart cache for immediate consistency
-                # self._cache_cart_item(session, product, quantity, result)  # TODO: Implement if needed
-                
+                logger.info(f"[Cart] ✅ Backend ADD successful for {product_name}")
                 return True, f" Added {quantity}x {product_name} to cart"
+                    
             else:
                 error_msg = result.get('message', 'Failed to add to cart') if result else 'Backend error'
                 logger.error(f"[Cart] Backend add to cart failed: {error_msg}")
@@ -118,7 +122,12 @@ class CartService:
             logger.info(f"[Cart] 👁️  VIEW CART OPERATION STARTED")
             logger.info(f"[Cart] 👤 User ID: {user_id}")
             logger.info(f"[Cart] 📱 Device ID: {device_id}")
+            logger.info(f"[Cart] 🏷️  Session ID: {session.session_id}")
             logger.info(f"[Cart] 🌐 Making API call: GET /v2/cart/{user_id}/{device_id}")
+            
+            # 🚨 CRITICAL DEBUG: Log the exact backend URL and parameters
+            logger.error(f"[CART DEBUG] VIEW_CART - Session: {session.session_id}, User: {user_id}, Device: {device_id}")
+            logger.error(f"[CART DEBUG] FULL URL: https://hp-buyer-backend-preprod.himira.co.in/clientApis/v2/cart/{user_id}/{device_id}")
             
             # Call backend get cart API
             result = await self.buyer_app.get_cart(user_id, device_id)
@@ -152,9 +161,9 @@ class CartService:
                 logger.warning(f"[Cart] Unexpected response format: {type(result)}")
                 return False, " Unexpected response format from backend", []
             
-            # Process cart items
+            # Process cart items - use ONLY real backend data (NO CACHE FALLBACK)
             if not cart_items:
-                logger.info(f"[Cart] Backend returned empty cart for user {user_id}")
+                logger.info(f"[Cart] Backend returned empty cart for user {user_id} - using real data only")
                 return True, " **Your cart is empty**\n\nStart shopping by searching for products!", []
             
             # Enhanced Multi-Provider Debug Logging
@@ -468,21 +477,22 @@ class CartService:
     
     def _extract_item_price(self, item: Dict) -> float:
         """Extract item price from backend cart item - handles actual Himira format"""
-        # Actual backend format doesn't include price - cart items are just references
-        # Backend format: {"item_id": "...", "count": 1, "provider_id": "..."} - NO PRICE DATA
+        # FIXED: Properly check for price value existence, not truthiness
         
         # Try nested product.price first (full product details if available)
-        if item.get('item', {}).get('product', {}).get('price', {}).get('value'):
-            return float(item['item']['product']['price']['value'])
+        price_obj = item.get('item', {}).get('product', {}).get('price', {})
+        if price_obj and 'value' in price_obj:
+            return float(price_obj['value'])
+            
         # Try item.price
         price = item.get('price', {})
-        if isinstance(price, dict):
-            return float(price.get('value', 0))
-        elif price:
+        if isinstance(price, dict) and 'value' in price:
+            return float(price['value'])
+        elif price and isinstance(price, (int, float)):
             return float(price)
         
-        # Backend cart items don't include price - return 0 for now
-        # TODO: Later enhancement could do separate product lookup for price
+        # ENHANCED: Log missing price data for debugging
+        logger.debug(f"[Cart] No price found for item {item.get('item_id', 'unknown')[:20]}...")
         return 0.0
     
     def _extract_provider_name(self, item: Dict) -> str:
@@ -556,6 +566,11 @@ class CartService:
                 "hasCustomisations": False,
                 "customisationState": {}
             }
+    # ================================
+    # REMOVED: Cart cache workaround methods
+    # Now using ONLY real backend data for cart operations
+    # ================================
+    
     # ================================
     # LEGACY METHODS - Kept for compatibility but deprecated
     # ================================
