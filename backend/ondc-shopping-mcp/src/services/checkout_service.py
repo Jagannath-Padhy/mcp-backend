@@ -1466,6 +1466,7 @@ Ready to proceed with order initialization!"""
                 
                 # Update session with payment information
                 session.checkout_state.payment_id = mock_payment['razorpayPaymentId']
+                session.checkout_state.payment_status = "success"
                 
                 return {
                     'success': True,
@@ -1516,6 +1517,25 @@ Ready to proceed with order initialization!"""
         Returns:
             Final order confirmation with order ID
         """
+        # EARLY MOCK MODE CHECK - Simple confirm for testing
+        if config.payment.mock_mode or os.getenv('MOCK_AFTER_INIT', 'false').lower() == 'true':
+            logger.info(f"[MOCK CONFIRM] Simple mock confirmation - bypassing complex ONDC logic")
+            
+            # Generate mock order ID
+            mock_order_id = self._generate_order_id()
+            
+            # Update session state
+            session.checkout_state.order_id = mock_order_id
+            session.checkout_state.stage = CheckoutStage.CONFIRMED
+            session.add_to_history('confirm_order', {'order_id': mock_order_id, 'mock': True})
+            
+            return {
+                'success': True,
+                'order_id': mock_order_id,
+                'message': f'🎉 Order confirmed successfully! Order ID: {mock_order_id}',
+                'mock_mode': True
+            }
+        
         # Validate session is in INIT stage (payment creation keeps session in INIT)
         if session.checkout_state.stage != CheckoutStage.INIT:
             return {
@@ -1701,60 +1721,40 @@ Ready to proceed with order initialization!"""
                         'message': ' Authentication required for real orders. Please login first.'
                     }
             
-            # MOCK AFTER INIT: Mock payment and confirm steps after real INIT
-            mock_after_init = os.getenv('MOCK_AFTER_INIT', 'false').lower() == 'true'
-            if mock_after_init:
-                logger.info(f"[CheckoutService] MOCK CONFIRM ONLY - Simulating final order confirmation step (rest of journey was real)")
-                logger.info(f"[CheckoutService] Real ONDC flow completed: SEARCH → CART → SELECT → INIT → [MOCK CONFIRM]")
-                
-                # Generate order_id for mock confirmation (INIT doesn't provide order_id per ONDC spec)
-                mock_order_id = self._generate_order_id()
-                
-                # Create mock confirmation response
-                result = {
-                    'success': True,
-                    'order_id': mock_order_id,
-                    'message': f'🎉 Order confirmed successfully! Order ID: {mock_order_id} (Mock confirmation - real ONDC journey completed through INIT)',
-                    'mock_confirm': True,
-                    'real_journey_completed': ['SEARCH', 'CART', 'SELECT', 'INIT'],
-                    'note': 'Order ID generated for mock CONFIRM since INIT step only confirms pricing per ONDC spec'
+            # Call BIAP CONFIRM API
+            confirm_response = await self.buyer_app.confirm_order(confirm_data, auth_token=auth_token)
+            
+            logger.info(f"[CheckoutService] CONFIRM API initial response received")
+            logger.debug(f"[CheckoutService] CONFIRM initial response: {json.dumps(confirm_response, indent=2) if confirm_response else 'None'}")
+            
+            # Extract message ID from response for polling
+            message_id = None
+            if confirm_response:
+                if isinstance(confirm_response, dict):
+                    message_id = confirm_response.get('messageId') or confirm_response.get('message_id')
+                elif isinstance(confirm_response, list) and len(confirm_response) > 0:
+                    message_id = confirm_response[0].get('messageId') or confirm_response[0].get('message_id')
+            
+            if not message_id:
+                logger.error(f"[CheckoutService] No messageId in CONFIRM response: {confirm_response}")
+                return {
+                    'success': False,
+                    'message': ' Failed to confirm order. No message ID received.'
                 }
-                logger.info(f"[CheckoutService] Generated mock order_id for CONFIRM: {mock_order_id}")
-                logger.info("[CheckoutService] Note: INIT step correctly does not provide order_id (per ONDC specification)")
-            else:
-                confirm_response = await self.buyer_app.confirm_order(confirm_data, auth_token=auth_token)
-                
-                logger.info(f"[CheckoutService] CONFIRM API initial response received")
-                logger.debug(f"[CheckoutService] CONFIRM initial response: {json.dumps(confirm_response, indent=2) if confirm_response else 'None'}")
-                
-                # Extract message ID from response for polling
-                message_id = None
-                if confirm_response:
-                    if isinstance(confirm_response, dict):
-                        message_id = confirm_response.get('messageId') or confirm_response.get('message_id')
-                    elif isinstance(confirm_response, list) and len(confirm_response) > 0:
-                        message_id = confirm_response[0].get('messageId') or confirm_response[0].get('message_id')
-                
-                if not message_id:
-                    logger.error(f"[CheckoutService] No messageId in CONFIRM response: {confirm_response}")
-                    return {
-                        'success': False,
-                        'message': ' Failed to confirm order. No message ID received.'
-                    }
-                
-                logger.info(f"[CheckoutService] Polling for CONFIRM response with messageId: {message_id}")
-                
-                # Poll for the actual CONFIRM response
-                result = await self._poll_for_response(
-                    poll_function=self.buyer_app.get_confirm_response,
-                    message_id=message_id,
-                    operation_name="CONFIRM",
-                    max_attempts=15,
-                    initial_delay=2.0,
-                    auth_token=auth_token
-                )
-                
-                logger.debug(f"[CheckoutService] Final CONFIRM response after polling: {json.dumps(result, indent=2) if result else 'None'}")
+            
+            logger.info(f"[CheckoutService] Polling for CONFIRM response with messageId: {message_id}")
+            
+            # Poll for the actual CONFIRM response
+            result = await self._poll_for_response(
+                poll_function=self.buyer_app.get_confirm_response,
+                message_id=message_id,
+                operation_name="CONFIRM",
+                max_attempts=15,
+                initial_delay=2.0,
+                auth_token=auth_token
+            )
+            
+            logger.debug(f"[CheckoutService] Final CONFIRM response after polling: {json.dumps(result, indent=2) if result else 'None'}")
             
             if result and result.get('success', True) and 'error' not in result:
                 # Extract order ID from response
