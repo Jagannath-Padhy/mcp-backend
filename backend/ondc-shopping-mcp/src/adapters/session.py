@@ -22,42 +22,53 @@ _LAST_SESSION = None
 
 
 async def initialize_shopping(session_id: Optional[str] = None, **kwargs) -> Dict[str, Any]:
-    """MCP adapter for initialize_shopping - Guest-only mode
+    """MCP adapter for initialize_shopping - Dynamic mode (guest or authenticated)
     
-    Creates a new guest session and prompts for deviceId to enable
-    complete order placement journey without authentication.
+    Creates a new session using provided credentials when available,
+    or falls back to guest mode for complete order placement journey.
     """
     try:
-        # Create or get session with enhanced conversation tracking
+        # Get session using agent session_id as single source of truth
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="initialize_shopping", **kwargs)
         
         # Clear any cached last session
         global _LAST_SESSION
         _LAST_SESSION = None
         
-        # Get guest configuration from config
+        # Get configuration
         from ..config import Config
         config = Config()
         
-        # Set guest mode explicitly using configured values
-        session_obj.user_authenticated = False
-        session_obj.demo_mode = False
-        session_obj.user_id = config.guest.user_id
+        # Check if specific userId and deviceId are provided as session properties
+        provided_user_id = kwargs.get('userId') or kwargs.get('user_id')
+        provided_device_id = kwargs.get('deviceId') or kwargs.get('device_id')
         
-        # Use configured device ID or allow override from kwargs
-        device_id = kwargs.get('deviceId') or kwargs.get('device_id') or config.guest.device_id
+        # Store credentials as session properties (not identifiers)
+        if provided_user_id and provided_device_id:
+            # Store authenticated user credentials as session properties
+            session_obj.user_authenticated = True
+            session_obj.demo_mode = False
+            session_obj.user_id = provided_user_id
+            session_obj.device_id = provided_device_id
+            logger.info(f"Session {session_obj.session_id[:8]}... - Stored authenticated credentials: userId={provided_user_id}, deviceId={provided_device_id}")
+        else:
+            # Store guest credentials as session properties
+            session_obj.user_authenticated = False
+            session_obj.demo_mode = False
+            session_obj.user_id = config.guest.user_id
+            session_obj.device_id = provided_device_id or config.guest.device_id
+            logger.info(f"Session {session_obj.session_id[:8]}... - Stored guest credentials: userId={session_obj.user_id}, deviceId={session_obj.device_id}")
         
-        # Always use the configured device ID for consistent guest journey
-        session_obj.device_id = device_id
-        logger.info(f"Initialized guest session {session_obj.session_id[:8]}... with configured deviceId: {device_id}")
+        # Log session info for debugging
+        logger.info(f"Session initialized: ID={session_obj.session_id}, userId={session_obj.user_id}, deviceId={session_obj.device_id}")
         
         # Perform guest login to get auth token for API authentication
         try:
             from ..buyer_backend_client import BuyerBackendClient
             buyer_app = BuyerBackendClient()
-            login_data = {"deviceId": device_id}
+            login_data = {"deviceId": session_obj.device_id}
             
-            logger.info(f"Attempting guest login for deviceId: {device_id}")
+            logger.info(f"Attempting guest login for deviceId: {session_obj.device_id}")
             login_response = await buyer_app.guest_user_login(login_data)
             
             if login_response and login_response.get('token'):
@@ -74,11 +85,19 @@ async def initialize_shopping(session_id: Optional[str] = None, **kwargs) -> Dic
             logger.error(f"❌ Guest login error for session {session_obj.session_id[:8]}...: {login_error}")
             auth_status = "❌ **Authentication Error** (Guest login failed - limited functionality)"
         
+        # Create dynamic success message based on session mode
+        if provided_user_id and provided_device_id:
+            session_type = "Authenticated Session"
+            guest_mode = False
+        else:
+            session_type = "Guest Session"
+            guest_mode = True
+            
         success_message = (
-            f"✅ **Guest Session Ready!**\n\n"
+            f"✅ **{session_type} Ready!**\n\n"
             f"**Session ID:** `{session_obj.session_id}`\n"
-            f"**Device ID:** `{device_id}`\n"
-            f"**User ID:** `{config.guest.user_id}`\n"
+            f"**Device ID:** `{session_obj.device_id}`\n"
+            f"**User ID:** `{session_obj.user_id}`\n"
             f"**Auth Status:** {auth_status}\n\n"
             f"🛍️ **Start Shopping:**\n"
             f"• `search_products query='organic rice'`\n"
@@ -96,9 +115,9 @@ async def initialize_shopping(session_id: Optional[str] = None, **kwargs) -> Dic
             True,
             success_message,
             session_obj.session_id,
-            guest_mode=True,
-            user_id=config.guest.user_id,
-            device_id=device_id,
+            guest_mode=guest_mode,
+            user_id=session_obj.user_id,
+            device_id=session_obj.device_id,
             next_action="start_shopping"
         )
         

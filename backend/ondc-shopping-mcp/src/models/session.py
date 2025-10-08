@@ -40,8 +40,24 @@ class CartItem:
     @property
     def provider_id(self) -> str:
         """Extract provider ID from provider object for backward compatibility"""
-        if self.provider and isinstance(self.provider, dict):
-            return self.provider.get('id') or self.provider.get('local_id', 'unknown')
+        try:
+            if self.provider:
+                if isinstance(self.provider, dict):
+                    return self.provider.get('id') or self.provider.get('local_id', 'unknown')
+                elif isinstance(self.provider, list) and len(self.provider) > 0:
+                    # Handle corrupted case where provider became a list
+                    first_provider = self.provider[0]
+                    if isinstance(first_provider, dict):
+                        return first_provider.get('id') or first_provider.get('local_id', 'unknown')
+                    # If it's a list of strings, use the first one
+                    elif isinstance(first_provider, str):
+                        return first_provider
+                # Handle any other corrupted type
+                elif isinstance(self.provider, str):
+                    return self.provider
+        except Exception:
+            # Completely defensive - if anything goes wrong, return unknown
+            pass
         return 'unknown'
     
     @property

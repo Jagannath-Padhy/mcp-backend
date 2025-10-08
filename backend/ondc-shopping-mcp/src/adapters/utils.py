@@ -9,36 +9,35 @@ logger = get_logger(__name__)
 
 
 def get_persistent_session(session_id: Optional[str] = None, tool_name: str = "unknown", **kwargs):
-    """Simplified helper to get session directly from session service
+    """Get session using agent session_id as single source of truth
     
-    This function directly uses the session service without the over-engineered
-    ConversationSessionManager layer. This ensures Langflow agent session IDs
-    and MCP session IDs remain consistent and work universally as MCP.
+    When agent provides session_id, use it directly without modification.
+    Store userId/deviceId as session properties, not as session identifiers.
     
     Args:
-        session_id: Optional session ID from Langflow Agent (used directly)
+        session_id: Session ID from agent (used as-is)
         tool_name: Name of the MCP tool calling this function (for logging)
-        **kwargs: Additional context (currently unused but kept for compatibility)
+        **kwargs: Additional context including userId/deviceId for session properties
         
     Returns:
         tuple: (session_obj, None) - None for conversation_manager (removed)
     """
     # Log MCP tool call for debugging
-    logger.info(f"[MCP Tool Call] {tool_name} - Session: {session_id[:16] if session_id else 'NEW'}")
+    logger.info(f"[MCP Tool Call] {tool_name} - Agent Session: {session_id[:16] if session_id else 'NEW'}")
     logger.debug(f"[MCP Tool Call] Full kwargs: {json.dumps(kwargs, default=str)}")
     from ..services.session_service import get_session_service
     session_service = get_session_service()
     
     if session_id:
-        # Use explicit session ID from Langflow agent
+        # ALWAYS use agent session_id as-is (single source of truth)
         session_obj = session_service.get(session_id)
         if session_obj is None:
-            # Create new session with the provided ID
+            # Create new session with agent's session_id
             session_obj = session_service.create_with_id(session_id)
-        logger.debug(f"[Session] Tool: {tool_name}, Using explicit session: {session_obj.session_id}")
+        logger.debug(f"[Session] Tool: {tool_name}, Using agent session: {session_obj.session_id}")
     else:
-        # Create new session if no session ID provided
-        session_obj = session_service.get_or_create()
+        # Only create new session if agent doesn't provide one
+        session_obj = session_service.create()
         logger.debug(f"[Session] Tool: {tool_name}, Created new session: {session_obj.session_id}")
     
     return session_obj, None
@@ -89,9 +88,10 @@ def format_mcp_response(success: bool, message: str, session_id: str,
         'session': {'session_id': session_id}  # MCP expects session dict
     }
     
-    # Format products for better display if present
-    if 'products' in extra_data:
-        extra_data['products'] = format_products_for_display(extra_data['products'])
+    # Send raw product data to agent instead of formatting
+    # This preserves full BIAP specifications for agent analysis
+    # if 'products' in extra_data:
+    #     extra_data['products'] = format_products_for_display(extra_data['products'])
     
     # Add any extra data
     response.update(extra_data)
@@ -242,3 +242,39 @@ def get_services():
         'order_service': get_order_service(),
         'payment_service': get_payment_service()
     }
+
+
+def send_raw_data_to_frontend(session_id: str, tool_name: str, raw_data: Dict[str, Any]):
+    """Universal helper to send raw data to frontend via SSE stream
+    
+    This function sends tool response data to the frontend via the internal API endpoint
+    that manages SSE streams. Used for cart, orders, and other tools that need structured
+    data transmission to frontend for rendering.
+    
+    Args:
+        session_id: Session identifier for routing data to correct SSE stream
+        tool_name: Name of the MCP tool (for event type mapping)
+        raw_data: Structured data to send to frontend
+    """
+    try:
+        import requests
+        import os
+        
+        # Get API URL from environment
+        api_url = os.getenv('API_URL', 'http://localhost:8001')
+        
+        # Prepare callback data for internal API endpoint
+        callback_data = {
+            'session_id': session_id,
+            'tool_name': tool_name, 
+            'raw_data': raw_data
+        }
+        
+        # Send to internal endpoint that manages SSE queues
+        requests.post(f"{api_url}/internal/tool-result", 
+            json=callback_data, timeout=0.5)
+        
+        logger.info(f"[Universal SSE] Sent {tool_name} data for session {session_id}")
+        
+    except Exception as e:
+        logger.warning(f"[Universal SSE] Failed to send {tool_name} data: {e}")

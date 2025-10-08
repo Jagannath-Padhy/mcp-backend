@@ -206,22 +206,7 @@ class BackendPayloadEnhancer:
         # Apply field mapping first
         backend_item = FieldMapper.to_backend(item)
         
-        # Enrich with provider data if missing
-        if not backend_item.get("provider"):
-            backend_item = enrich_cart_item_with_provider(backend_item)
-        
-        # Ensure critical fields
-        if not backend_item.get("bpp_id"):
-            backend_item["bpp_id"] = HIMIRA_BPP_ID
-        
-        if not backend_item.get("bpp_uri"):
-            backend_item["bpp_uri"] = HIMIRA_BPP_URI
-        
-        if not backend_item.get("contextCity"):
-            backend_item["contextCity"] = "std:0172"  # Default to Chandigarh area
-        
-        # Fix provider location structure
-        backend_item = FieldMapper.apply_provider_location_fix(backend_item)
+        # Apply minimal required transformations only
         
         return backend_item
     
@@ -240,8 +225,9 @@ class BackendPayloadEnhancer:
         mcp_result = FieldMapper.from_backend(result)
         
         # Preserve original data for cart operations
-        if "raw" not in mcp_result and "_raw" not in mcp_result:
-            mcp_result["raw"] = result
+        # Temporarily commented out to test if cart works without raw field duplication
+        # if "raw" not in mcp_result and "_raw" not in mcp_result:
+        #     mcp_result["raw"] = result
         
         return mcp_result
 

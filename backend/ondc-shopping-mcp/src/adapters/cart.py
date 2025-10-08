@@ -7,12 +7,15 @@ from .utils import (
     save_persistent_session, 
     extract_session_id, 
     format_mcp_response,
-    get_services
+    get_services,
+    send_raw_data_to_frontend
 )
 from ..utils.logger import get_logger
 from ..utils.field_mapper import from_backend
 
 logger = get_logger(__name__)
+
+
 
 # Get services
 services = get_services()
@@ -99,14 +102,62 @@ async def add_to_cart(session_id: Optional[str] = None, item: Optional[Dict] = N
         # Get cart summary
         cart_summary = cart_service.get_cart_summary(session_obj)
         
+        # Get raw backend cart data for SSE streaming (after successful add)
+        raw_backend_data = None
+        logger.debug(f"[Cart Debug] Starting backend data capture. Success: {success}")
+        if success:
+            try:
+                user_id = session_obj.user_id or "guestUser"
+                device_id = getattr(session_obj, 'device_id', 'device_9bca8c59')
+                logger.debug(f"[Cart Debug] About to call get_cart with user_id: {user_id}, device_id: {device_id}")
+                
+                # First try backend cart for authenticated users
+                if session_obj.user_authenticated and session_obj.user_id:
+                    logger.debug(f"[Cart Debug] User authenticated, fetching from backend")
+                    backend_result = await cart_service.buyer_app.get_cart(user_id, device_id)
+                    logger.debug(f"[Cart Debug] Backend call completed. Result type: {type(backend_result)}, Result: {backend_result}")
+                    if backend_result:
+                        raw_backend_data = backend_result
+                        logger.info(f"[Cart] Raw backend data captured from backend: {len(raw_backend_data) if isinstance(raw_backend_data, list) else 'dict'}")
+                    else:
+                        logger.warning(f"[Cart Debug] Backend result is empty for authenticated user: {backend_result}")
+                
+                # For guest users or if backend is empty, use local cart data
+                if not raw_backend_data and session_obj.cart and session_obj.cart.items:
+                    logger.debug(f"[Cart Debug] Using local cart data for SSE transmission")
+                    # Convert local cart items to dictionary format for SSE
+                    raw_backend_data = []
+                    for item in session_obj.cart.items:
+                        if hasattr(item, 'to_dict'):
+                            cart_item_dict = item.to_dict()
+                            # Add BIAP-compatible structure
+                            cart_item_dict['biap_format'] = True
+                            cart_item_dict['source'] = 'local_session'
+                            raw_backend_data.append(cart_item_dict)
+                    logger.info(f"[Cart] Raw cart data captured from local session: {len(raw_backend_data)} items")
+                
+            except Exception as e:
+                logger.error(f"[Cart] Failed to capture raw backend data after add: {e}", exc_info=True)
+        
         # Save session with enhanced persistence
         save_persistent_session(session_obj, conversation_manager)
+        
+        # Send raw cart data to frontend via SSE (Universal Pattern)
+        if raw_backend_data:
+            raw_data_for_sse = {
+                'cart_items': raw_backend_data,
+                'cart_summary': cart_summary,
+                'biap_specifications': True
+            }
+            send_raw_data_to_frontend(session_obj.session_id, 'add_to_cart', raw_data_for_sse)
+            logger.info(f"[Universal SSE] Cart data sent for session {session_obj.session_id}")
         
         return format_mcp_response(
             success,
             message,
             session_obj.session_id,
-            cart_summary=cart_summary
+            cart_summary=cart_summary,
+            raw_backend_data=raw_backend_data  # Add raw backend data for SSE transmission
         )
         
     except Exception as e:
@@ -125,37 +176,48 @@ async def view_cart(session_id: Optional[str] = None, **kwargs) -> Dict[str, Any
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="view_cart", **kwargs)
         logger.info(f"[Cart] View cart - Session ID: {session_obj.session_id}")
         
-        # Get guest configuration for consistent device ID
-        from ..config import Config
-        config = Config()
+        # SYNC: Fetch from backend and sync to local session.cart (the missing piece!)
+        logger.info(f"[Cart] Syncing backend cart to local session for display")
+        sync_success = await cart_service.sync_backend_to_local_cart(session_obj)
         
-        # If authenticated, fetch cart from backend
-        if session_obj.user_authenticated and session_obj.user_id:
-            logger.info(f"[Cart] Fetching cart from backend for user {session_obj.user_id}")
-            # Use session device_id if available, otherwise fall back to configured guest device_id
-            device_id = getattr(session_obj, 'device_id', config.guest.device_id)
-            
-            # Get backend cart
-            from ..buyer_backend_client import BuyerBackendClient
-            buyer_app = BuyerBackendClient()
-            backend_cart = await buyer_app.get_cart(session_obj.user_id, device_id)
-            
-            if backend_cart and not backend_cart.get('error'):
-                logger.info(f"[Cart] Backend cart fetched successfully")
-                # TODO: Sync backend cart to local session if needed
+        if not sync_success:
+            logger.warning(f"[Cart] Backend sync failed, proceeding with local cart display")
         
-        # Get cart display
+        # Get cart display using the original working service method
         cart_display = cart_service.format_cart_display(session_obj)
         cart_summary = cart_service.get_cart_summary(session_obj)
         
+        # Get raw backend cart data for SSE streaming
+        raw_backend_data = None
+        try:
+            user_id = session_obj.user_id or "guestUser"
+            device_id = getattr(session_obj, 'device_id', 'device_9bca8c59')
+            backend_result = await cart_service.buyer_app.get_cart(user_id, device_id)
+            if backend_result:
+                raw_backend_data = backend_result
+                logger.info(f"[Cart] Raw backend data captured for SSE: {len(raw_backend_data) if isinstance(raw_backend_data, list) else 'dict'}")
+        except Exception as e:
+            logger.warning(f"[Cart] Failed to capture raw backend data: {e}")
+        
         # Save session with enhanced persistence
         save_persistent_session(session_obj, conversation_manager)
+        
+        # Send raw cart data to frontend via SSE (Universal Pattern)
+        if raw_backend_data:
+            raw_data_for_sse = {
+                'cart_items': raw_backend_data,
+                'cart_summary': cart_summary,
+                'biap_specifications': True
+            }
+            send_raw_data_to_frontend(session_obj.session_id, 'view_cart', raw_data_for_sse)
+            logger.info(f"[Universal SSE] Cart data sent for session {session_obj.session_id}")
         
         return format_mcp_response(
             True,
             cart_display,
             session_obj.session_id,
-            cart=cart_summary
+            cart=cart_summary,
+            raw_backend_data=raw_backend_data  # Add raw backend data for SSE transmission
         )
         
     except Exception as e:

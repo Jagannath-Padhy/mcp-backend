@@ -269,8 +269,26 @@ class CartService:
         Returns:
             Cart summary dictionary
         """
+        # Debug logging to identify list vs CartItem issue
+        logger.debug(f"[Cart] Debug - session.cart.items type: {type(session.cart.items)}")
+        logger.debug(f"[Cart] Debug - session.cart.items length: {len(session.cart.items) if hasattr(session.cart.items, '__len__') else 'No length'}")
+        
+        cart_items = []
+        for i, item in enumerate(session.cart.items):
+            logger.debug(f"[Cart] Debug - item {i} type: {type(item)}")
+            logger.debug(f"[Cart] Debug - item {i} hasattr to_dict: {hasattr(item, 'to_dict')}")
+            if hasattr(item, 'to_dict'):
+                cart_items.append(item.to_dict())
+            else:
+                logger.error(f"[Cart] Error - item {i} is not a CartItem object: {type(item)} - {item}")
+                # Try to handle gracefully
+                if isinstance(item, dict):
+                    cart_items.append(item)
+                else:
+                    logger.error(f"[Cart] Error - cannot convert item to dict: {item}")
+        
         return {
-            'items': [item.to_dict() for item in session.cart.items],
+            'items': cart_items,
             'total_items': session.cart.total_items,
             'total_value': session.cart.total_value,
             'is_empty': session.cart.is_empty()
@@ -783,6 +801,157 @@ class CartService:
         except Exception as e:
             logger.error(f"[Cart] Error fetching backend cart: {e}")
             return False, f" Failed to load cart: {str(e)}", []
+
+    async def sync_backend_to_local_cart(self, session: Session) -> bool:
+        """
+        Sync backend cart data to local session.cart
+        
+        This implements the missing synchronization that was referenced in TODO comments.
+        Fetches cart from backend and populates local session.cart for existing operations.
+        
+        Args:
+            session: User session
+            
+        Returns:
+            bool: True if sync successful, False otherwise
+        """
+        try:
+            user_id = session.user_id or "guestUser"
+            device_id = getattr(session, 'device_id', 'device_9bca8c59')
+            
+            logger.info(f"[Cart] Syncing backend cart to local - User: {user_id}, Device: {device_id}")
+            
+            # Fetch from backend using same API as original working view_cart
+            backend_result = await self.buyer_app.get_cart(user_id, device_id)
+            
+            # Handle response format
+            if backend_result is None:
+                logger.info(f"[Cart] Backend returned empty cart for {user_id}")
+                session.cart.clear()
+                return True
+                
+            # Check for explicit error
+            if isinstance(backend_result, dict) and backend_result.get('error'):
+                logger.warning(f"[Cart] Backend cart sync failed: {backend_result.get('message', 'Unknown error')}")
+                return False
+                
+            # Get cart items array
+            if isinstance(backend_result, list):
+                backend_items = backend_result
+            elif isinstance(backend_result, dict) and 'data' in backend_result:
+                backend_items = backend_result.get('data', [])
+            else:
+                logger.warning(f"[Cart] Unexpected backend response format: {type(backend_result)}")
+                return False
+            
+            # Clear existing local cart
+            session.cart.clear()
+            
+            # Convert and add each backend item to local cart
+            for backend_item in backend_items:
+                try:
+                    cart_item = self._convert_backend_item_to_cart_item(backend_item)
+                    if cart_item:
+                        session.cart.add_item(cart_item)
+                        logger.debug(f"[Cart] Synced item: {cart_item.name} x{cart_item.quantity}")
+                except Exception as e:
+                    logger.warning(f"[Cart] Failed to convert backend item: {e}")
+                    continue
+            
+            logger.info(f"[Cart] Sync complete - {len(session.cart.items)} items in local cart")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[Cart] Error syncing backend to local cart: {e}")
+            return False
+
+    def _convert_backend_item_to_cart_item(self, backend_item: Dict[str, Any]) -> Optional[CartItem]:
+        """
+        Convert backend cart item to local CartItem object
+        
+        Args:
+            backend_item: Backend cart item response
+            
+        Returns:
+            CartItem object or None if conversion fails
+        """
+        try:
+            # Add type check to prevent "'list' object has no attribute 'get'" error
+            if not isinstance(backend_item, dict):
+                logger.error(f"[Cart] Expected dict, got {type(backend_item)}: {backend_item}")
+                return None
+            
+            # Extract from backend structure - from logs we know the format
+            item_data = backend_item.get('item', {})
+            if not isinstance(item_data, dict):
+                logger.error(f"[Cart] item_data is not dict: {type(item_data)}")
+                return None
+                
+            product_data = item_data.get('product', {})
+            if not isinstance(product_data, dict):
+                logger.error(f"[Cart] product_data is not dict: {type(product_data)}")
+                return None
+                
+            descriptor = product_data.get('descriptor', {})
+            price_data = product_data.get('price', {})
+            
+            # Extract essential fields with safe access
+            item_id = backend_item.get('id', backend_item.get('item_id', ''))
+            name = descriptor.get('name', 'Unknown Product') if isinstance(descriptor, dict) else 'Unknown Product'
+            price = float(price_data.get('value', 0)) if isinstance(price_data, dict) else 0.0
+            quantity = int(backend_item.get('count', 1))
+            
+            # Extract provider information safely
+            provider_id = backend_item.get('provider_id', '')
+            provider_data = item_data.get('provider', {})
+            if not isinstance(provider_data, dict):
+                provider_data = {}
+            
+            # Safe image URL extraction (this was the problematic line!)
+            image_url = None
+            if isinstance(descriptor, dict) and descriptor.get('images'):
+                images = descriptor.get('images', [])
+                if isinstance(images, list) and len(images) > 0:
+                    first_image = images[0]
+                    if isinstance(first_image, dict):
+                        image_url = first_image.get('url', '')
+                    elif isinstance(first_image, str):
+                        image_url = first_image
+            
+            # Safe description extraction
+            description = ''
+            if isinstance(descriptor, dict):
+                description = descriptor.get('short_desc') or descriptor.get('long_desc') or ''
+            
+            # Create CartItem using required and optional fields
+            cart_item = CartItem(
+                id=item_id,
+                name=name,
+                price=price,
+                quantity=quantity,
+                local_id=product_data.get('id', item_data.get('local_id', '')),
+                bpp_id=item_data.get('bpp_id', ''),
+                bpp_uri=item_data.get('bpp_uri', ''),
+                contextCity=item_data.get('contextCity'),
+                category=product_data.get('category_id'),
+                image_url=image_url,
+                description=description,
+                product=product_data,
+                provider=provider_data,
+                location_id=product_data.get('location_id'),
+                fulfillment_id=product_data.get('fulfillment_id'),
+                parent_item_id=product_data.get('parent_item_id'),
+                tags=item_data.get('tags'),
+                customisations=backend_item.get('customisations')
+            )
+            
+            logger.debug(f"[Cart] Successfully converted: {name} x{quantity} - ₹{price}")
+            
+            return cart_item
+            
+        except Exception as e:
+            logger.error(f"[Cart] Error converting backend item to CartItem: {e}")
+            return None
 
 
 # Singleton instance

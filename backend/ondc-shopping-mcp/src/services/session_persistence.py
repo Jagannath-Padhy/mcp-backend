@@ -242,5 +242,5 @@ def get_session_persistence() -> SessionPersistence:
     """Get singleton SessionPersistence instance for MCP server"""
     global _session_persistence
     if _session_persistence is None:
-        _session_persistence = SessionPersistence()
+        _session_persistence = SessionPersistence(os.getenv("SESSION_STORE_PATH"))
     return _session_persistence

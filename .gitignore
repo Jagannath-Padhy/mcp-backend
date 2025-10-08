@@ -6,7 +6,7 @@
 # Reference implementations (keep locally, don't commit)
 biap-client-node-js/
 himira-nextjs-frontend-main/
-
+/tests
 # Documentation (keep locally, don't commit)
 *.md
 !README.md

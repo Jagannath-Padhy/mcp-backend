@@ -6,7 +6,8 @@ from .utils import (
     save_persistent_session, 
     extract_session_id, 
     format_mcp_response,
-    get_services
+    get_services,
+    send_raw_data_to_frontend
 )
 from ..utils.logger import get_logger
 
@@ -84,6 +85,17 @@ Or provide delivery location directly:
         
         # Save enhanced session with conversation tracking
         save_persistent_session(session_obj, conversation_manager)
+        
+        # Send raw checkout data to frontend via SSE (Universal Pattern)
+        if result['success'] and result.get('quote_data'):
+            raw_data_for_sse = {
+                'stage': result.get('stage'),
+                'quote_data': result.get('quote_data'),
+                'next_step': result.get('next_step'),
+                'biap_specifications': True
+            }
+            send_raw_data_to_frontend(session_obj.session_id, 'select_items_for_order', raw_data_for_sse)
+            logger.info(f"[Universal SSE] SELECT data sent for session {session_obj.session_id}")
         
         return format_mcp_response(
             result['success'],
@@ -181,6 +193,18 @@ To initialize your order, I need your complete information:
         
         # Save enhanced session with conversation tracking
         save_persistent_session(session_obj, conversation_manager)
+        
+        # Send raw checkout data to frontend via SSE (Universal Pattern)
+        if result['success'] and result.get('init_data'):
+            raw_data_for_sse = {
+                'stage': result.get('stage'),
+                'order_summary': result.get('order_summary'),
+                'init_data': result.get('init_data'),
+                'next_step': result.get('next_step'),
+                'biap_specifications': True
+            }
+            send_raw_data_to_frontend(session_obj.session_id, 'initialize_order', raw_data_for_sse)
+            logger.info(f"[Universal SSE] INIT data sent for session {session_obj.session_id}")
         
         return format_mcp_response(
             result['success'],
@@ -325,6 +349,18 @@ async def confirm_order(
         
         # Save enhanced session with conversation tracking
         save_persistent_session(session_obj, conversation_manager)
+        
+        # Send raw checkout data to frontend via SSE (Universal Pattern)
+        if result['success'] and result.get('confirm_data'):
+            raw_data_for_sse = {
+                'order_id': result.get('order_id'),
+                'order_details': result.get('order_details'),
+                'confirm_data': result.get('confirm_data'),
+                'next_actions': result.get('next_actions'),
+                'biap_specifications': True
+            }
+            send_raw_data_to_frontend(session_obj.session_id, 'confirm_order', raw_data_for_sse)
+            logger.info(f"[Universal SSE] CONFIRM data sent for session {session_obj.session_id}")
         
         return format_mcp_response(
             result['success'],

@@ -124,6 +124,81 @@ from .utils.logger import get_mcp_operations_logger
 logger = get_logger(__name__)
 mcp_ops_logger = get_mcp_operations_logger()
 
+# Universal SSE Data Transmission Helper Functions
+def extract_raw_data(result, tool_name):
+    """Extract raw data based on tool type for SSE transmission"""
+    if tool_name == 'search_products':
+        return {
+            'products': result.get('products', []),
+            'total_results': result.get('total_results', 0),
+            'search_type': result.get('search_type', 'hybrid'),
+            'page': result.get('page', 1),
+            'page_size': result.get('page_size', 10)
+        }
+    elif tool_name in ['add_to_cart', 'view_cart', 'update_cart_quantity', 'remove_from_cart', 'clear_cart', 'get_cart_total']:
+        return {
+            'cart_items': result.get('raw_backend_data', []),
+            'cart_summary': result.get('cart', {}),
+            'biap_specifications': True
+        }
+    # Future tools: just return raw_backend_data if available
+    return result.get('raw_backend_data', result)
+
+def has_raw_data(result):
+    """Check if result contains any raw data worth transmitting"""
+    logger.info(f"[Universal SSE] Checking raw data - Result type: {type(result)}")
+    logger.info(f"[Universal SSE] Result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+    
+    if not isinstance(result, dict) or not result.get('success'):
+        logger.info(f"[Universal SSE] No raw data - not dict or not successful: dict={isinstance(result, dict)}, success={result.get('success') if isinstance(result, dict) else 'N/A'}")
+        return False
+    
+    # Check for products data
+    if result.get('products'):
+        logger.info(f"[Universal SSE] Has products data: {len(result.get('products', []))} products")
+        return True
+        
+    # Check for raw_backend_data (cart, orders, etc.)
+    raw_backend_data = result.get('raw_backend_data')
+    logger.info(f"[Universal SSE] raw_backend_data type: {type(raw_backend_data)}, value: {raw_backend_data}")
+    
+    if raw_backend_data:
+        logger.info(f"[Universal SSE] Has raw_backend_data: {len(raw_backend_data) if isinstance(raw_backend_data, list) else 'not list'}")
+        return True
+        
+    logger.info(f"[Universal SSE] No raw data found")
+    return False
+
+def send_raw_data_to_frontend(session_id, tool_name, result):
+    """Universal function to send raw data to frontend via SSE"""
+    try:
+        import requests
+        import os
+        api_url = os.getenv('API_INTERNAL_URL', 'http://localhost:8001')
+        
+        raw_data = extract_raw_data(result, tool_name)
+        callback_data = {
+            'session_id': session_id,
+            'tool_name': tool_name,
+            'raw_data': raw_data
+        }
+        
+        requests.post(f"{api_url}/internal/tool-result", 
+            json=callback_data, timeout=0.5)
+        
+        # Log different data types appropriately
+        if tool_name == 'search_products':
+            logger.info(f"[RAW-DATA] Sent {len(raw_data.get('products', []))} products to frontend via callback")
+        elif tool_name in ['add_to_cart', 'view_cart', 'update_cart_quantity', 'remove_from_cart', 'clear_cart']:
+            cart_items = raw_data.get('cart_items', [])
+            item_count = len(cart_items) if isinstance(cart_items, list) else 'dict'
+            logger.info(f"[RAW-DATA] Sent cart data ({item_count} items) to frontend via callback")
+        else:
+            logger.info(f"[RAW-DATA] Sent {tool_name} data to frontend via callback")
+            
+    except Exception as e:
+        logger.warning(f"[RAW-DATA] Failed to send {tool_name} data to frontend: {e}")
+
 # Initialize FastMCP server with official SDK
 mcp = FastMCP("ondc-shopping")
 
@@ -207,6 +282,9 @@ def extract_session_from_context(ctx: Context, **kwargs) -> Optional[str]:
 
 async def handle_tool_execution(tool_name: str, adapter_func, ctx: Context, **kwargs):
     """Generic handler for tool execution with comprehensive request/response logging"""
+    logger.info(f"[ENTRY-POINT] handle_tool_execution called for {tool_name}")
+    logger.info(f"[ENTRY-POINT] kwargs: {kwargs}")
+    
     session_id = None
     start_time = time.time()
     backend_calls = []
@@ -253,7 +331,23 @@ async def handle_tool_execution(tool_name: str, adapter_func, ctx: Context, **kw
         # Basic logging (keep existing for backward compatibility)
         logger.info(f"[{tool_name}] Execution successful in {execution_time_ms:.2f}ms")
         
-        # Return formatted result
+        # Log result structure for debugging
+        logger.info(f"[Universal Pattern] Tool: {tool_name}, checking result structure")
+        logger.info(f"[Universal Pattern] Result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+        if isinstance(result, dict):
+            logger.info(f"[Universal Pattern] Has success: {result.get('success')}")
+            logger.info(f"[Universal Pattern] Has products: {bool(result.get('products'))}")
+            logger.info(f"[Universal Pattern] Has raw_backend_data: {bool(result.get('raw_backend_data'))}")
+        
+        # Universal SSE data transmission for all tools with raw data
+        logger.info(f"[Universal Pattern] About to call has_raw_data() for {tool_name}")
+        if has_raw_data(result):
+            logger.info(f"[Universal Pattern] has_raw_data() returned True, calling send_raw_data_to_frontend()")
+            send_raw_data_to_frontend(session_id, tool_name, result)
+        else:
+            logger.info(f"[Universal Pattern] has_raw_data() returned False, no SSE transmission")
+        
+        # Return formatted result (JSON strings for mcp-agent compatibility)
         if isinstance(result, dict):
             return json.dumps(result, indent=2, default=str)
         else:

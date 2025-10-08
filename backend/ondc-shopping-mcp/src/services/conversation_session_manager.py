@@ -41,7 +41,7 @@ class ConversationSessionManager:
         Args:
             storage_path: Base path for session storage
         """
-        self.base_storage = Path(storage_path or os.path.expanduser("~/.ondc-mcp"))
+        self.base_storage = Path(os.getenv("SESSION_STORE_PATH"))
         self.conversation_storage = self.base_storage / "conversations" 
         self.session_storage = self.base_storage / "mcp_sessions"
         

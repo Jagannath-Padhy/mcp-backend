@@ -164,7 +164,8 @@ class ProductEnrichmentService:
         item.local_id = enriched_data['local_id']  # UUID
         item.bpp_id = enriched_data['bpp_id']  # Himira BPP ID
         item.bpp_uri = enriched_data['bpp_uri']  # Himira BPP URI
-        item.provider = enriched_data['provider']  # Full Himira provider structure
+        provider_data = enriched_data['provider']
+        item.provider = provider_data[0] if isinstance(provider_data, list) else provider_data  # Ensure dict
         item.location_id = enriched_data['location_id']  # Himira location ID
         item.contextCity = enriched_data['contextCity']  # std:0172
         item.domain = enriched_data['domain']  # ONDC:RET10

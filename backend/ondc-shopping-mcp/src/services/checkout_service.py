@@ -373,8 +373,8 @@ class CheckoutService:
                 logger.info("[CheckoutService] Using auth token for SELECT request")
             
             # Call BIAP SELECT API (works with or without auth token for guest)
-            # FIXED: Send as array format as expected by backend selectMultipleOrder
-            select_response = await self.buyer_app.select_items([select_data], auth_token=auth_token)
+            # FIXED: Remove double array wrapping - buyer_backend_client will wrap correctly
+            select_response = await self.buyer_app.select_items(select_data, auth_token=auth_token)
             
             logger.info(f"[CheckoutService] SELECT API initial response received")
             logger.debug(f"[CheckoutService] SELECT initial response: {json.dumps(select_response, indent=2) if select_response else 'None'}")
