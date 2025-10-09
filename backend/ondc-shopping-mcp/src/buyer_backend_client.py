@@ -54,8 +54,12 @@ class BuyerBackendClient:
         self.limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
         
         logger.info(f"BuyerBackendClient initialized with base_url: {self.base_url}")
+        logger.info(f"[DEBUG] Environment DEBUG_CURL_LOGGING: {os.getenv('DEBUG_CURL_LOGGING', 'NOT_SET')}")
+        logger.info(f"[DEBUG] self.debug_curl value: {self.debug_curl}")
         if self.debug_curl:
             logger.info("[DEBUG] CURL logging enabled for API calls")
+        else:
+            logger.warning("[DEBUG] CURL logging is DISABLED - no CURL commands will be logged")
     
     def _generate_curl_command(self, method: str, url: str, headers: Dict, 
                                params: Optional[Dict], json_data: Optional[Dict]) -> str:
@@ -108,13 +112,26 @@ class BuyerBackendClient:
         elif require_auth:
             logger.warning(f"Auth required for {endpoint} but no token provided")
         
-        # Log CURL command if debug mode
-        if self.debug_curl:
+        # FORCE CURL logging for debugging - always show for INIT requests
+        force_curl_log = endpoint in ["/v2/initialize_order", "/v2/select"] or self.debug_curl
+        
+        if force_curl_log:
+            logger.info(f"[DEBUG] About to log CURL for {endpoint} - debug_curl: {self.debug_curl}, force: {force_curl_log}")
             curl_cmd = self._generate_curl_command(method, url, request_headers, params, json_data)
             logger.info(f"\n{'='*80}")
             logger.info(f"[CURL DEBUG] API Call to {endpoint}")
             logger.info(f"[CURL COMMAND]:\n{curl_cmd}")
             logger.info(f"{'='*80}")
+        else:
+            logger.info(f"[DEBUG] SKIPPING CURL log for {endpoint} - debug_curl: {self.debug_curl}")
+            
+        # Add explicit request logging
+        logger.info(f"[REQUEST] {method.upper()} {url}")
+        logger.info(f"[REQUEST] Headers: {request_headers}")
+        if json_data:
+            logger.info(f"[REQUEST] Body: {json.dumps(json_data, indent=2)}")
+        if params:
+            logger.info(f"[REQUEST] Params: {params}")
         
         try:
             async with httpx.AsyncClient(timeout=self.timeout, limits=self.limits) as client:
@@ -128,7 +145,20 @@ class BuyerBackendClient:
                 
                 logger.debug(f"{method.upper()} {url} -> {response.status_code}")
                 
-                # Log response in debug mode
+                # FORCE response logging for debugging
+                force_response_log = endpoint in ["/v2/initialize_order", "/v2/select"] or self.debug_curl
+                
+                if force_response_log:
+                    logger.info(f"[RESPONSE] Status: {response.status_code}")
+                    logger.info(f"[RESPONSE] Headers: {dict(response.headers)}")
+                    try:
+                        response_json = response.json()
+                        logger.info(f"[RESPONSE] Body:\n{json.dumps(response_json, indent=2)}")
+                    except Exception as e:
+                        logger.info(f"[RESPONSE] Body (raw): {response.text}")
+                        logger.warning(f"[RESPONSE] Failed to parse JSON: {e}")
+                    
+                # Legacy response logging for compatibility
                 if self.debug_curl or endpoint == "/v2/select":
                     logger.info(f"[CURL RESPONSE] Status: {response.status_code}")
                     try:

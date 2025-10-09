@@ -95,7 +95,6 @@ Or provide delivery location directly:
                 'biap_specifications': True
             }
             send_raw_data_to_frontend(session_obj.session_id, 'select_items_for_order', raw_data_for_sse)
-            logger.info(f"[Universal SSE] SELECT data sent for session {session_obj.session_id}")
         
         return format_mcp_response(
             result['success'],
@@ -204,7 +203,6 @@ To initialize your order, I need your complete information:
                 'biap_specifications': True
             }
             send_raw_data_to_frontend(session_obj.session_id, 'initialize_order', raw_data_for_sse)
-            logger.info(f"[Universal SSE] INIT data sent for session {session_obj.session_id}")
         
         return format_mcp_response(
             result['success'],
@@ -272,11 +270,9 @@ async def create_payment(
                 f"Status: {result['data']['status']}\n\n"
                 f" Ready for order confirmation. Use 'confirm_order' next.",
                 session_obj.session_id,
-                {
-                    'payment_data': result['data'],
-                    'next_step': result['next_step'],
-                    '_mock_indicators': result['data'].get('_mock_indicators', {})
-                }
+                payment_data=result['data'],
+                next_step=result['next_step'],
+                _mock_indicators=result['data'].get('_mock_indicators', {})
             )
         else:
             # Save session even on failure to preserve state
@@ -360,7 +356,6 @@ async def confirm_order(
                 'biap_specifications': True
             }
             send_raw_data_to_frontend(session_obj.session_id, 'confirm_order', raw_data_for_sse)
-            logger.info(f"[Universal SSE] CONFIRM data sent for session {session_obj.session_id}")
         
         return format_mcp_response(
             result['success'],

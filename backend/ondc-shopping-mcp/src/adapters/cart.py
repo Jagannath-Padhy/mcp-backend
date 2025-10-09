@@ -150,14 +150,12 @@ async def add_to_cart(session_id: Optional[str] = None, item: Optional[Dict] = N
                 'biap_specifications': True
             }
             send_raw_data_to_frontend(session_obj.session_id, 'add_to_cart', raw_data_for_sse)
-            logger.info(f"[Universal SSE] Cart data sent for session {session_obj.session_id}")
         
         return format_mcp_response(
             success,
             message,
             session_obj.session_id,
-            cart_summary=cart_summary,
-            raw_backend_data=raw_backend_data  # Add raw backend data for SSE transmission
+            cart_summary=cart_summary
         )
         
     except Exception as e:
@@ -210,14 +208,12 @@ async def view_cart(session_id: Optional[str] = None, **kwargs) -> Dict[str, Any
                 'biap_specifications': True
             }
             send_raw_data_to_frontend(session_obj.session_id, 'view_cart', raw_data_for_sse)
-            logger.info(f"[Universal SSE] Cart data sent for session {session_obj.session_id}")
         
         return format_mcp_response(
             True,
             cart_display,
             session_obj.session_id,
-            cart=cart_summary,
-            raw_backend_data=raw_backend_data  # Add raw backend data for SSE transmission
+            cart=cart_summary
         )
         
     except Exception as e:

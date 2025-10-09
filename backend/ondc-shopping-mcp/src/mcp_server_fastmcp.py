@@ -56,7 +56,8 @@ from .adapters.utils import (
     extract_session_id,
     format_mcp_response,
     format_products_for_display,
-    get_services
+    get_services,
+    send_raw_data_to_frontend
 )
 
 # Import all tool adapters
@@ -169,35 +170,6 @@ def has_raw_data(result):
     logger.info(f"[Universal SSE] No raw data found")
     return False
 
-def send_raw_data_to_frontend(session_id, tool_name, result):
-    """Universal function to send raw data to frontend via SSE"""
-    try:
-        import requests
-        import os
-        api_url = os.getenv('API_INTERNAL_URL', 'http://localhost:8001')
-        
-        raw_data = extract_raw_data(result, tool_name)
-        callback_data = {
-            'session_id': session_id,
-            'tool_name': tool_name,
-            'raw_data': raw_data
-        }
-        
-        requests.post(f"{api_url}/internal/tool-result", 
-            json=callback_data, timeout=0.5)
-        
-        # Log different data types appropriately
-        if tool_name == 'search_products':
-            logger.info(f"[RAW-DATA] Sent {len(raw_data.get('products', []))} products to frontend via callback")
-        elif tool_name in ['add_to_cart', 'view_cart', 'update_cart_quantity', 'remove_from_cart', 'clear_cart']:
-            cart_items = raw_data.get('cart_items', [])
-            item_count = len(cart_items) if isinstance(cart_items, list) else 'dict'
-            logger.info(f"[RAW-DATA] Sent cart data ({item_count} items) to frontend via callback")
-        else:
-            logger.info(f"[RAW-DATA] Sent {tool_name} data to frontend via callback")
-            
-    except Exception as e:
-        logger.warning(f"[RAW-DATA] Failed to send {tool_name} data to frontend: {e}")
 
 # Initialize FastMCP server with official SDK
 mcp = FastMCP("ondc-shopping")
