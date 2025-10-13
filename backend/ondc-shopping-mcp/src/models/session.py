@@ -246,9 +246,20 @@ class Cart:
         items = [CartItem.from_dict(item) for item in data.get('items', [])]
         return cls(items=items)
     
-    # Dictionary compatibility methods for backward compatibility
+    # Dictionary compatibility methods for backward compatibility with existing code
     def get(self, key: str, default: Any = None) -> Any:
-        """Dictionary-like get method for backward compatibility"""
+        """Dictionary-like get method for backward compatibility
+        
+        Enables Cart objects to be used where dictionary access is expected.
+        Maintains object-oriented functionality while supporting legacy dict patterns.
+        
+        Args:
+            key: Dictionary key to access ('items', 'total_items', 'total_value')
+            default: Default value if key not found
+            
+        Returns:
+            Requested cart data in dictionary-compatible format
+        """
         if key == 'items':
             return [item.to_dict() for item in self.items]  # Return dict format for compatibility
         elif key == 'total_items':
@@ -258,18 +269,43 @@ class Cart:
         return default
     
     def __getitem__(self, key: str) -> Any:
-        """Dictionary-like item access for backward compatibility"""
+        """Dictionary-like item access for backward compatibility
+        
+        Enables cart['items'] syntax for legacy code compatibility.
+        
+        Args:
+            key: Dictionary key to access
+            
+        Returns:
+            Requested cart data
+            
+        Raises:
+            KeyError: If key is not a valid cart attribute
+        """
         result = self.get(key)
         if result is None and key in ['items', 'total_items', 'total_value']:
             raise KeyError(f"'{key}'")
         return result
     
     def keys(self):
-        """Dictionary-like keys method for backward compatibility"""
+        """Dictionary-like keys method for backward compatibility
+        
+        Returns:
+            List of available cart data keys
+        """
         return ['items', 'total_items', 'total_value']
     
     def __contains__(self, key: str) -> bool:
-        """Dictionary-like 'in' operator support"""
+        """Dictionary-like 'in' operator support for backward compatibility
+        
+        Enables 'key in cart' syntax for legacy code.
+        
+        Args:
+            key: Key to check for existence
+            
+        Returns:
+            True if key is a valid cart attribute
+        """
         return key in ['items', 'total_items', 'total_value']
 
 

@@ -1,4 +1,12 @@
-"""Cart operations for MCP adapters"""
+"""Cart Operations for MCP Adapters with AI-Enhanced Functionality
+
+Provides comprehensive cart management with:
+- Intelligent item auto-detection from search history
+- Real-time backend synchronization
+- Context-aware cart operations
+- Enhanced error handling and logging
+- Universal SSE data transmission for frontend updates
+"""
 
 from typing import Dict, Any, Optional
 import json
@@ -14,8 +22,6 @@ from ..utils.logger import get_logger
 from ..utils.field_mapper import from_backend
 
 logger = get_logger(__name__)
-
-
 
 # Get services
 services = get_services()
@@ -174,8 +180,7 @@ async def view_cart(session_id: Optional[str] = None, **kwargs) -> Dict[str, Any
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="view_cart", **kwargs)
         logger.info(f"[Cart] View cart - Session ID: {session_obj.session_id}")
         
-        
-        # SYNC: Fetch from backend and sync to local session.cart (the missing piece!)
+        # SYNC: Fetch from backend and sync to local session.cart
         logger.info(f"[Cart] Syncing backend cart to local session for display")
         sync_success = await cart_service.sync_backend_to_local_cart(session_obj)
         
@@ -302,7 +307,6 @@ async def clear_cart(session_id: Optional[str], **kwargs) -> Dict[str, Any]:
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="clear_cart", **kwargs)
         logger.info(f"[Cart] Clear cart - Session ID: {session_obj.session_id}")
         
-        
         # Step 1: Get real current cart data from backend first
         logger.info(f"[Cart] Step 1: Getting real cart data from backend...")
         try:
@@ -326,7 +330,7 @@ async def clear_cart(session_id: Optional[str], **kwargs) -> Dict[str, Any]:
             
             if backend_result is not None:
                 success = True
-                message = f" Cart cleared successfully - removed {len(backend_cart_data)} items"
+                message = f"✅ Cart cleared successfully - removed {len(backend_cart_data)} items"
                 logger.info(f"[Cart] Backend clear cart successful: {backend_result}")
                 
                 # Clear local session cart to match backend
@@ -335,16 +339,16 @@ async def clear_cart(session_id: Optional[str], **kwargs) -> Dict[str, Any]:
                 
             else:
                 success = False
-                message = " Failed to clear cart from backend"
+                message = "❌ Failed to clear cart from backend"
                 logger.error(f"[Cart] Backend clear cart failed - returned None")
         else:
             # Cart is already empty
             success = True
-            message = " Your cart is already empty"
+            message = "ℹ️ Your cart is already empty"
             logger.info(f"[Cart] Cart already empty, no items to clear")
         
-        # Step 4: Refresh cart view and get real empty cart data
-        logger.info(f"[Cart] Step 4: Refreshing cart view to show real empty state...")
+        # Refresh cart view and get real empty cart data
+        logger.info(f"[Cart] Refreshing cart view to show real empty state...")
         cart_view_result = await view_cart(session_id, **kwargs)
         
         # Get the final cart summary from the view result

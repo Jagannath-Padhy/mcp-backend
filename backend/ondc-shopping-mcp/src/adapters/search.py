@@ -1,4 +1,4 @@
-"""Search operations for MCP adapters"""
+"""Search operations for MCP adapters - Agent-Driven Design"""
 
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -23,59 +23,23 @@ session_service = services['session_service']
 async def search_products(session_id: Optional[str] = None, query: str = '', 
                              latitude: Optional[float] = None,
                              longitude: Optional[float] = None,
-                             page: int = 1, limit: Optional[int] = None,
-                             max_results: Optional[int] = None,
-                             relevance_threshold: Optional[float] = None,
-                             adaptive_results: bool = True,
-                             context_aware: bool = True,
+                             page: int = 1, 
+                             limit: int = 10,  # Agent decides appropriate limit
+                             relevance_threshold: float = 0.7,  # Good default, agent can override
                              **kwargs) -> Dict[str, Any]:
-    """MCP adapter for search_products with intelligent result sizing"""
+    """MCP adapter for search_products - Agent-driven intelligent search
+    
+    Simple, flexible search that lets the MCP agent be intelligent about:
+    - Search query formulation
+    - Result limits based on user context
+    - Relevance thresholds based on search precision needs
+    - Follow-up search strategy
+    """
     try:
         # Get enhanced session with conversation tracking
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="search_products", **kwargs)
         
-        # Import QueryAnalyzer and Config for intelligent sizing
-        from ..utils.query_analyzer import get_query_analyzer
-        from ..config import config
-        
-        # Determine optimal search configuration using AI query analysis
-        search_context = {}
-        
-        if context_aware and session_obj:
-            # Build search context from session data
-            search_context = {
-                'user_preferences': getattr(session_obj, 'user_preferences', {}),
-                'session_history': {
-                    'recent_search_count': len(getattr(session_obj, 'search_history', [])),
-                },
-                'cart_items': len(getattr(session_obj, 'cart', {}).get('items', []))
-            }
-        
-        # Use QueryAnalyzer for intelligent configuration
-        query_config = None
-        if adaptive_results and config.search.query_analysis_enabled:
-            analyzer = get_query_analyzer()
-            query_config = analyzer.analyze_query(query, search_context)
-        
-        # Determine final search parameters
-        if query_config and adaptive_results:
-            # Use AI-determined configuration
-            final_limit = max_results or query_config.max_results
-            final_threshold = relevance_threshold or query_config.relevance_threshold
-            search_intent = query_config.intent.value
-        else:
-            # Use provided parameters or defaults
-            final_limit = max_results or limit or config.search.default_limit
-            final_threshold = relevance_threshold or config.search.default_relevance_threshold
-            search_intent = "manual"
-        
-        # Ensure limits stay within configured bounds
-        final_limit = max(config.search.min_results, min(final_limit, config.search.max_results))
-        final_threshold = max(config.search.min_relevance_threshold, 
-                             min(final_threshold, config.search.max_relevance_threshold))
-        
-        logger.info(f"[SearchAdapter] Query: '{query}' -> Intent: {search_intent}, "
-                   f"Limit: {final_limit}, Threshold: {final_threshold}")
+        logger.info(f"[Search] Agent-driven search - Query: '{query}', Limit: {limit}, Threshold: {relevance_threshold}")
         
         # Get session pincode if available
         session_pincode = None
@@ -83,14 +47,13 @@ async def search_products(session_id: Optional[str] = None, query: str = '',
         if delivery_location and delivery_location.get('pincode'):
             session_pincode = delivery_location['pincode']
         
-        # Perform search using service with intelligent parameters
+        # Simple search call with agent-specified parameters
         results = await search_service.search_products(
-            query, latitude, longitude, page, final_limit, session_pincode,
-            relevance_threshold=final_threshold,
-            query_intent=search_intent
+            query, latitude, longitude, page, limit, session_pincode,
+            relevance_threshold=relevance_threshold
         )
         
-        # Extract the actual items from the reranked search results
+        # Extract and format products
         products = []
         search_results = results.get('search_results', [])
         
@@ -108,31 +71,24 @@ async def search_products(session_id: Optional[str] = None, query: str = '',
                 mcp_item = enhance_for_mcp(item_data)
                 products.append(mcp_item)
         
-        # Update session history with intelligent search metadata
+        # Update session history with product results for context
         session_obj.search_history.append({
             'query': query,
             'timestamp': datetime.utcnow().isoformat(),
             'results_count': len(results.get('search_results', [])),
-            'products': products[:5] if products else [],  # Store top 5 products for context
-            'search_intent': search_intent,
-            'relevance_threshold': final_threshold,
-            'adaptive_sizing': adaptive_results,
-            'final_limit': final_limit
+            'products': products[:5] if products else [],  # Store top 5 for context
+            'agent_params': {
+                'limit': limit,
+                'relevance_threshold': relevance_threshold,
+                'search_type': results.get('search_type', 'hybrid')
+            }
         })
         
-        # Enhanced message with intelligent search summary
+        # Simple success message - let agent interpret results
         if products:
-            intent_desc = f" ({search_intent} intent)" if search_intent != "manual" else ""
-            message = f" Found {len(products)} relevant products for '{query}'{intent_desc} ({results.get('search_type', 'hybrid')} search)"
+            message = f" Found {len(products)} products for '{query}'"
         else:
-            # Get search suggestions if query analysis was performed
-            suggestions = []
-            if query_config and hasattr(query_config, 'intent'):
-                analyzer = get_query_analyzer()
-                suggestions = analyzer.get_search_suggestions(query, query_config.intent)
-            
-            suggestion_text = f" Try: {suggestions[0]}" if suggestions else " Try a different search term."
-            message = f"No products found for '{query}'.{suggestion_text}"
+            message = f"No products found for '{query}'. Try different search terms or broader criteria."
         
         # Save session with enhanced persistence
         save_persistent_session(session_obj, conversation_manager)
@@ -141,20 +97,17 @@ async def search_products(session_id: Optional[str] = None, query: str = '',
             results.get('success', True),
             message,
             session_obj.session_id,
-            products=products,  # Will be formatted by format_mcp_response
+            products=products,
             total_results=results.get('total_results', 0),
-            search_type=results.get('search_type', 'unknown'),
+            search_type=results.get('search_type', 'hybrid'),
             page=results.get('page', 1),
-            page_size=results.get('page_size', final_limit),
-            # Enhanced search metadata for UI
-            search_metadata={
-                'query_intent': search_intent,
-                'relevance_threshold': final_threshold,
-                'adaptive_results': adaptive_results,
-                'context_aware': context_aware,
-                'original_limit_requested': max_results or limit or "auto",
-                'final_limit_applied': final_limit,
-                'search_suggestions': analyzer.get_search_suggestions(query, query_config.intent) if query_config else []
+            page_size=results.get('page_size', limit),
+            # Agent-friendly metadata
+            search_params={
+                'query': query,
+                'limit_requested': limit,
+                'relevance_threshold': relevance_threshold,
+                'results_returned': len(products)
             }
         )
         
@@ -173,58 +126,64 @@ async def advanced_search(session_id: Optional[str] = None, query: Optional[str]
                              price_min: Optional[float] = None,
                              price_max: Optional[float] = None,
                              location: Optional[str] = None,
-                             page: int = 1, limit: int = 10,
+                             page: int = 1, 
+                             limit: int = 10,  # Agent decides
                              **kwargs) -> Dict[str, Any]:
-    """MCP adapter for advanced_search"""
+    """MCP adapter for advanced_search - Agent-driven filtering"""
     try:
         # Get enhanced session with conversation tracking
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="advanced_search", **kwargs)
         
-        # Perform search using service
+        logger.info(f"[Search] Advanced search - Category: {category}, Brand: {brand}, Limit: {limit}")
+        
+        # Perform search using service with agent-specified limit
         results = await search_service.advanced_search(
             query, category, brand, price_min, price_max, 
             location, page, limit
         )
         
-        # Extract the actual items from the reranked search results (same as search_products)
+        # Extract products
         products = []
         search_results = results.get('search_results', [])
         
         for result in search_results:
             if isinstance(result, dict) and 'item' in result:
-                # Handle nested item structure
                 products.append(result['item'])
             elif isinstance(result, dict):
-                # Handle flat structure
                 products.append(result)
         
-        # Update session history with actual product results for conversation context
+        # Update session history
         session_obj.search_history.append({
-            'query': query or f"Advanced search: {category or 'all categories'}",
+            'query': query or f"Advanced search: {category or 'filtered'}",
             'timestamp': datetime.utcnow().isoformat(),
             'results_count': len(results.get('search_results', [])),
-            'products': products[:5] if products else []  # Store top 5 products for context
+            'products': products[:5] if products else [],
+            'filters_applied': {
+                'category': category,
+                'brand': brand,
+                'price_range': f"{price_min}-{price_max}" if price_min or price_max else None
+            }
         })
 
-        # Enhanced message with result summary
+        # Simple message
         if products:
-            filter_desc = f" with category: {category}" if category else ""
-            message = f" Found {len(products)} products{filter_desc} ({results.get('search_type', 'filtered')} search)"
+            filter_desc = f" in {category}" if category else ""
+            message = f" Found {len(products)} products{filter_desc}"
         else:
-            message = f"No products found matching your filters. Try adjusting your search criteria."
+            message = f"No products found matching your filters. Try adjusting search criteria."
 
-        # Save session with enhanced persistence
+        # Save session
         save_persistent_session(session_obj, conversation_manager)
 
         return format_mcp_response(
             results.get('success', True),
             message,
             session_obj.session_id,
-            products=products,  # Will be formatted by simple formatter
+            products=products,
             total_results=results.get('total_results', 0),
             search_type=results.get('search_type', 'filtered'),
             page=results.get('page', 1),
-            page_size=results.get('page_size', 10)
+            page_size=results.get('page_size', limit)
         )
         
     except Exception as e:
@@ -245,27 +204,17 @@ async def browse_categories(session_id: Optional[str] = None, **kwargs) -> Dict[
         # Get categories using service
         results = await search_service.browse_categories()
         
-        # Debug logging
-        logger.info(f"[MCP Adapter] browse_categories results keys: {list(results.keys())}")
-        logger.info(f"[MCP Adapter] Number of categories: {len(results.get('categories', []))}")
+        logger.info(f"[Categories] Retrieved {len(results.get('categories', []))} categories")
         
-        # Save session with enhanced persistence
+        # Save session
         save_persistent_session(session_obj, conversation_manager)
         
-        # Format response
-        response = format_mcp_response(
+        return format_mcp_response(
             True,
             results.get('message', 'Categories retrieved'),
             session_obj.session_id,
             categories=results.get('categories', [])
         )
-        
-        # Log what we're returning
-        logger.info(f"[MCP Adapter] Response keys: {list(response.keys())}")
-        if 'categories' in response:
-            logger.info(f"[MCP Adapter] Returning {len(response['categories'])} categories")
-        
-        return response
         
     except Exception as e:
         logger.error(f"Failed to browse categories: {e}")
