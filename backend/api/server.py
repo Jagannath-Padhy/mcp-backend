@@ -285,13 +285,6 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = Field(None, description="Session ID")
     device_id: Optional[str] = Field(None, description="Device ID")
 
-class ChatResponse(BaseModel):
-    response: str
-    session_id: str
-    timestamp: datetime
-    data: Optional[Any] = None  # Structured data from tool results
-    context_type: Optional[str] = None  # Type of data (products/cart/order/checkout)
-    action_required: Optional[bool] = False  # If user action is needed
 
 class SessionCreateRequest(BaseModel):
     device_id: Optional[str] = None
@@ -304,10 +297,6 @@ class SessionResponse(BaseModel):
     last_activity: datetime
     metadata: Dict[str, Any]
 
-class SearchRequest(BaseModel):
-    query: str
-    filters: Optional[Dict[str, Any]] = {}
-    limit: int = 20
 
 class CartRequest(BaseModel):
     action: str  # add, remove, update, view
@@ -429,61 +418,37 @@ def process_mcp_results(contents) -> tuple:
     context_type = None
     action_required = False
     
-    # Enhanced debugging for mcp-agent response structure
-    logger.info(f"[SSE-DEBUG] Contents type: {type(contents)}, Length: {len(contents) if contents else 0}")
-    
+    # Process MCP agent response structure
     if contents and len(contents) > 0:
-        for i, content in enumerate(contents):
-            logger.info(f"[SSE-DEBUG] Content {i} type: {type(content)}, Has parts: {hasattr(content, 'parts')}")
+        for content in contents:
             if hasattr(content, 'parts') and content.parts:
-                logger.info(f"[SSE-DEBUG] Content {i} parts count: {len(content.parts)}")
-                for j, part in enumerate(content.parts):
-                    logger.info(f"[SSE-DEBUG] Part {j} type: {type(part)}, Attributes: {[attr for attr in dir(part) if not attr.startswith('_')]}")
-                    
+                for part in content.parts:
                     if hasattr(part, 'text') and part.text:
                         response_text += part.text
-                        logger.info(f"[SSE-DEBUG] Found text part: {part.text[:100]}...")
                     elif hasattr(part, 'function_response'):
-                        logger.info(f"[SSE-DEBUG] Found function_response, attributes: {[attr for attr in dir(part.function_response) if not attr.startswith('_')]}")
-                        logger.info(f"[SSE-DEBUG] Function response object: {part.function_response}")
-                        logger.info(f"[SSE-DEBUG] Function response type: {type(part.function_response)}")
-                        
                         # Try different ways to access the structured data
                         tool_result = None
                         if hasattr(part.function_response, 'content'):
-                            # Old way - JSON string content
                             try:
                                 if isinstance(part.function_response.content, str):
                                     tool_result = json.loads(part.function_response.content)
                                 else:
                                     tool_result = part.function_response.content
-                                logger.info(f"[SSE-DEBUG] SUCCESS via content! Tool result keys: {list(tool_result.keys()) if isinstance(tool_result, dict) else 'Not a dict'}")
                             except (json.JSONDecodeError, AttributeError) as e:
-                                logger.warning(f"[SSE-DEBUG] Failed to parse content: {e}")
+                                logger.debug(f"Failed to parse content: {e}")
                         elif hasattr(part.function_response, 'result'):
-                            # Try result attribute
                             tool_result = part.function_response.result
-                            logger.info(f"[SSE-DEBUG] SUCCESS via result! Tool result keys: {list(tool_result.keys()) if isinstance(tool_result, dict) else 'Not a dict'}")
                         elif isinstance(part.function_response, dict):
-                            # Direct dict access
                             tool_result = part.function_response
-                            logger.info(f"[SSE-DEBUG] SUCCESS via direct dict! Tool result keys: {list(tool_result.keys())}")
                         else:
-                            # Try converting to dict
                             try:
                                 tool_result = dict(part.function_response)
-                                logger.info(f"[SSE-DEBUG] SUCCESS via dict conversion! Tool result keys: {list(tool_result.keys())}")
                             except:
-                                logger.warning(f"[SSE-DEBUG] Could not extract structured data from function_response")
+                                logger.debug("Could not extract structured data from function_response")
                         
                         if tool_result and isinstance(tool_result, dict):
                             structured_data = tool_result
                             context_type, action_required = determine_context_type(tool_result)
-                            logger.info(f"[SSE-DEBUG] Context type: {context_type}, Action required: {action_required}")
-                        else:
-                            logger.warning(f"[SSE-DEBUG] No structured data extracted from function_response")
-                    else:
-                        logger.info(f"[SSE-DEBUG] Part {j} is neither text nor function_response")
     
     
     # Clean up response text
@@ -494,118 +459,6 @@ def process_mcp_results(contents) -> tuple:
     
     return response_text, structured_data, context_type, action_required
 
-# Main chat endpoint
-@app.post("/api/v1/chat", response_model=ChatResponse)
-@limiter.limit("20/minute")
-async def chat(request: Request, chat_req: ChatRequest):
-    """Chat with the shopping assistant"""
-    
-    check_agent_ready()
-    
-    # Generate IDs if not provided
-    device_id = chat_req.device_id or generate_device_id()
-    session_id = chat_req.session_id or generate_session_id()
-    
-    # Create or update session
-    create_or_update_session(session_id, device_id)
-    
-    try:
-        # Get session-specific LLM with conversation history
-        logger.info(f"[CHAT-REGULAR] Processing message for session: {session_id}")
-        session_llm = await get_session_llm(session_id)
-        
-        # Enhance message with context
-        enhanced_message = f"[Session: {session_id}] [Device: {device_id}] {chat_req.message}"
-        logger.info(f"[CHAT-REGULAR] Enhanced message: {enhanced_message}")
-        
-        # Configure request parameters for precise tool calling
-        request_params = RequestParams(
-            max_iterations=5,  # Allow multi-turn tool conversations
-            use_history=True,  # Maintain conversation history
-            temperature=0.2,  # Low temperature for precise tool selection
-            maxTokens=2000
-        )
-        
-        # Get AI response using full conversation loop
-        logger.info(f"[AGENT-DEBUG] Calling session_llm.generate for session: {session_id}")
-        logger.info(f"[AGENT-DEBUG] Enhanced message: {enhanced_message}")
-        logger.info(f"[AGENT-DEBUG] Request params: max_iterations={request_params.max_iterations}, temperature={request_params.temperature}")
-        
-        contents = await session_llm.generate(
-            message=enhanced_message,
-            request_params=request_params
-        )
-        
-        # Enhanced debug logging for agent response
-        logger.info(f"[AGENT-DEBUG] LLM generate returned {len(contents) if contents else 0} contents")
-        
-        # Process the response using proper MCP integration
-        response_text = ""
-        structured_data = None
-        context_type = None
-        action_required = False
-        tool_calls_found = 0
-        
-        # The GoogleAugmentedLLM should handle tool calling automatically
-        # We just need to extract the final response and any structured data
-        if contents and len(contents) > 0:
-            for i, content in enumerate(contents):
-                logger.info(f"[AGENT-DEBUG] Processing content {i}, has parts: {hasattr(content, 'parts')}")
-                if content.parts:
-                    logger.info(f"[AGENT-DEBUG] Content {i} has {len(content.parts)} parts")
-                    for j, part in enumerate(content.parts):
-                        logger.info(f"[AGENT-DEBUG] Part {j} type: {type(part)}")
-                        logger.info(f"[AGENT-DEBUG] Part {j} attributes: {[attr for attr in dir(part) if not attr.startswith('_')]}")
-                        
-                        if hasattr(part, 'text') and part.text:
-                            logger.info(f"[AGENT-DEBUG] Found text part: {part.text[:200]}...")
-                            response_text += part.text
-                        elif hasattr(part, 'function_response'):
-                            tool_calls_found += 1
-                            logger.info(f"[AGENT-DEBUG] Found function_response part! Tool call #{tool_calls_found}")
-                            logger.info(f"[AGENT-DEBUG] Function response type: {type(part.function_response)}")
-                            logger.info(f"[AGENT-DEBUG] Function response attributes: {[attr for attr in dir(part.function_response) if not attr.startswith('_')]}")
-                            
-                            # Handle tool execution results if present
-                            if hasattr(part.function_response, 'content'):
-                                try:
-                                    # Parse tool result as JSON if possible
-                                    tool_result = json.loads(part.function_response.content)
-                                    structured_data = tool_result
-                                    
-                                    # Determine context type using helper function
-                                    context_type, action_required = determine_context_type(tool_result)
-                                except (json.JSONDecodeError, AttributeError):
-                                    # If not JSON or no content attribute, just add to response text
-                                    response_text += str(part.function_response)
-        
-        # Clean up response text - remove any "None" prefix
-        if response_text.startswith("None"):
-            response_text = response_text[4:]
-        
-        response = response_text or "I'm ready to help you with your shopping needs!"
-        
-        return ChatResponse(
-            response=response,
-            session_id=session_id,
-            timestamp=datetime.now(),
-            data=structured_data,
-            context_type=context_type,
-            action_required=action_required
-        )
-        
-    except Exception as e:
-        logger.error(f"Chat error: {e}")
-        
-        # Handle Google AI quota exhaustion gracefully
-        error_str = str(e)
-        if "RESOURCE_EXHAUSTED" in error_str or "quota" in error_str.lower():
-            raise HTTPException(
-                status_code=503, 
-                detail="AI assistant temporarily unavailable due to quota limits. Shopping tools continue to work normally."
-            )
-        else:
-            raise HTTPException(status_code=500, detail=str(e))
 
 # SSE Streaming chat endpoint
 @app.post("/api/v1/chat/stream")
@@ -680,9 +533,11 @@ async def chat_stream(request: Request, chat_req: ChatRequest):
             
             # Send different event types based on content
             if structured_data and context_type:
-                # Products found - enhanced with raw BIAP data for frontend rendering
+                # Products found - enhanced with raw BIAP data and intelligent search metadata
                 if context_type == 'products':
                     products_list = structured_data.get('products', [])
+                    search_metadata = structured_data.get('search_metadata', {})
+                    
                     yield sse_event('products', {
                         'products': products_list,  # Now contains raw BIAP data with full specifications
                         'search_results': structured_data.get('search_results', []),  # Full search context if available
@@ -694,7 +549,19 @@ async def chat_stream(request: Request, chat_req: ChatRequest):
                         'page_size': structured_data.get('page_size', 10),
                         'session_id': session_id,
                         'raw_data': True,  # Signal to frontend this contains unformatted BIAP data
-                        'biap_specifications': True  # Signal that full ONDC specifications are available
+                        'biap_specifications': True,  # Signal that full ONDC specifications are available
+                        # Enhanced search intelligence metadata
+                        'search_intelligence': {
+                            'query_intent': search_metadata.get('query_intent', 'unknown'),
+                            'relevance_threshold': search_metadata.get('relevance_threshold'),
+                            'adaptive_results': search_metadata.get('adaptive_results', False),
+                            'context_aware': search_metadata.get('context_aware', False),
+                            'original_limit_requested': search_metadata.get('original_limit_requested', 'auto'),
+                            'final_limit_applied': search_metadata.get('final_limit_applied', 10),
+                            'search_suggestions': search_metadata.get('search_suggestions', []),
+                            'semantic_validation': search_metadata.get('relevance_threshold', 0) > 0.6,
+                            'filtered_by_relevance': structured_data.get('filtered_by_relevance', False)
+                        }
                     })
                 
                 # Cart updated
@@ -785,48 +652,6 @@ async def chat_stream(request: Request, chat_req: ChatRequest):
     return StreamingResponse(robust_event_stream(), media_type="text/event-stream")
 
 # Search endpoint
-@app.post("/api/v1/search")
-@limiter.limit("30/minute")
-async def search_products(request: Request, search_req: SearchRequest):
-    """Hybrid search for products"""
-    
-    check_agent_ready()
-    
-    try:
-        # Use agent to search with proper tool calling
-        search_prompt = f"Search for products: {search_req.query}"
-        if search_req.filters:
-            search_prompt += f" with filters: {search_req.filters}"
-        
-        # Call search tool directly
-        try:
-            tool_result = await agent.call_tool(
-                server_name="ondc-shopping",
-                name="search_products",
-                arguments={"query": search_req.query}
-            )
-            
-            # Format search results
-            if tool_result and isinstance(tool_result, dict) and 'products' in tool_result:
-                products = tool_result['products']
-                response = f"Found {len(products)} products:\\n"
-                for i, product in enumerate(products[:10], 1):
-                    response += f"{i}. {product.get('name', 'Unknown')} - ₹{product.get('price', 'N/A')}\\n"
-            else:
-                response = str(tool_result) if tool_result else "No results found"
-        except Exception as e:
-            logger.error(f"Search tool error: {e}")
-            response = f"Search failed: {str(e)}"
-        
-        return {
-            "query": search_req.query,
-            "results": response or "No results found",
-            "timestamp": datetime.now()
-        }
-        
-    except Exception as e:
-        logger.error(f"Search error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # Cart management
 @app.post("/api/v1/cart/{device_id}")
@@ -900,7 +725,7 @@ async def root():
         "status": "operational",
         "endpoints": {
             "health": "/health",
-            "chat": "/api/v1/chat",
+            "chat_stream": "/api/v1/chat/stream",
             "sessions": "/api/v1/sessions",
             "search": "/api/v1/search",
             "cart": "/api/v1/cart/{device_id}"

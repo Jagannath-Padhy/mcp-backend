@@ -3,7 +3,6 @@ Device ID Generation Utility - Matches Frontend Pattern
 """
 
 import uuid
-import asyncio
 from typing import Optional
 from ..utils.logger import get_logger
 

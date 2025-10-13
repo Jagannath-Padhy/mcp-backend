@@ -150,7 +150,9 @@ class SearchService:
                             latitude: Optional[float] = None,
                             longitude: Optional[float] = None,
                             page: int = 1, limit: int = 20,
-                            session_pincode: Optional[str] = None) -> Dict[str, Any]:
+                            session_pincode: Optional[str] = None,
+                            relevance_threshold: Optional[float] = None,
+                            query_intent: str = "unknown") -> Dict[str, Any]:
         """Search for products with hybrid search capabilities
         
         Combines results from both Vector DB and MongoDB (via API) for comprehensive search.
@@ -270,14 +272,52 @@ class SearchService:
                 else:
                     formatted_vector_results.append(vr)
             
-            # Rerank combined results with AI scoring
+            # Rerank combined results with AI scoring and intelligent threshold
             final_results = reranker.rerank(
                 api_results=api_results,
                 vector_results=formatted_vector_results,
-                query=query
+                query=query,
+                custom_threshold=relevance_threshold,
+                query_intent=query_intent
             )
             
             logger.info(f"AI reranking completed: {len(final_results)} final results")
+            
+            # Optional: Apply LLM-based semantic validation if enabled
+            if final_results and relevance_threshold and relevance_threshold > 0.6:
+                from ..utils.relevance_filter import get_relevance_filter
+                relevance_filter = get_relevance_filter()
+                
+                if relevance_filter.is_available():
+                    # Extract products for semantic validation
+                    products_for_validation = []
+                    for result in final_results[:10]:  # Validate top 10 results only
+                        product = result.get('item', {})
+                        products_for_validation.append(product)
+                    
+                    # Perform semantic validation
+                    validated_products = await relevance_filter.validate_results(
+                        query, products_for_validation, query_intent, max_validate=10
+                    )
+                    
+                    # Update final_results with validated products
+                    if len(validated_products) < len(products_for_validation):
+                        # Some products were filtered out by semantic validation
+                        validated_result_items = []
+                        for validated_product in validated_products:
+                            # Find corresponding result item
+                            for result in final_results:
+                                if result.get('item', {}).get('id') == validated_product.get('id'):
+                                    validated_result_items.append(result)
+                                    break
+                        
+                        # Keep remaining unvalidated results and add validated ones at the top
+                        semantic_filtered_results = validated_result_items + final_results[10:]
+                        final_results = semantic_filtered_results
+                        
+                        logger.info(f"Semantic validation filtered {len(products_for_validation) - len(validated_products)} products")
+                    else:
+                        logger.info(f"All {len(products_for_validation)} products passed semantic validation")
             
             # Smart fallback: If reranking filtered out everything but we had good vector results
             if not final_results and vector_results:
@@ -320,7 +360,9 @@ class SearchService:
         if total_results == 0:
             message = f" No products found for '{query}'"
         else:
-            message = f" Found {total_results} products ({search_type_str} search)"
+            intent_info = f" ({query_intent} intent)" if query_intent != "unknown" else ""
+            threshold_info = f", threshold: {relevance_threshold:.2f}" if relevance_threshold else ""
+            message = f" Found {total_results} products{intent_info} ({search_type_str} search{threshold_info})"
         
         return {
             "success": True,
@@ -329,7 +371,10 @@ class SearchService:
             "total_results": total_results,
             "page": page,
             "page_size": limit,
-            "search_type": search_type_str
+            "search_type": search_type_str,
+            "query_intent": query_intent,
+            "relevance_threshold": relevance_threshold,
+            "filtered_by_relevance": relevance_threshold is not None
         }
     
     async def advanced_search(self, query: Optional[str] = None,

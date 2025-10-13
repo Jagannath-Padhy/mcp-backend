@@ -113,7 +113,7 @@ class CheckoutService:
                         return response_data
                     elif has_error:
                         error_msg = self._extract_ondc_error_message(response_data)
-                        logger.error(f"[Polling] {operation_name} failed - {error_msg}")
+                        logger.error(f"[Polling] {operation_name} operation failed after {attempts} attempts. Error: {error_msg}. This usually indicates an issue with the ONDC backend or malformed request data.")
                         return None
                     else:
                         # Still processing - continue polling
@@ -124,7 +124,7 @@ class CheckoutService:
                         logger.debug(f"[Polling] Response structure check - Context: {response_data.get('context', {}).get('action', 'missing')}, Has message: {bool(response_data.get('message'))}, Has error: {has_error}")
             
             except Exception as e:
-                logger.error(f"[Polling] Error during {operation_name} polling attempt {attempts}: {e}")
+                logger.error(f"[Polling] Network/connection error during {operation_name} polling attempt {attempts}/{max_attempts}: {e}. Check backend connectivity and network stability.")
             
             # Wait before next attempt
             if attempts < max_attempts:
@@ -134,7 +134,7 @@ class CheckoutService:
                 # Exponential backoff with max delay
                 delay = min(delay * backoff_factor, max_delay)
         
-        logger.error(f"[Polling]  Timeout: {operation_name} did not complete after {attempts} attempts")
+        logger.error(f"[Polling] Timeout: {operation_name} operation timed out after {attempts} attempts over {max_attempts * initial_delay:.1f} seconds. This may indicate backend overload or network issues. Consider retrying the operation.")
         return None
     
     def _check_ondc_response_completion(self, response_data: Dict, operation_name: str) -> Tuple[bool, bool, str]:
@@ -816,18 +816,9 @@ class CheckoutService:
                 'deviceId': getattr(session, 'device_id', config.guest.device_id)
             }]
             
-            # Step 12: ENHANCED LOGGING - Capture complete INIT request payload
-            logger.info(f"[INIT REQUEST DEBUG] ===== COMPLETE INIT PAYLOAD =====")
-            logger.info(f"[INIT REQUEST DEBUG] Session ID: {session.session_id}")
-            logger.info(f"[INIT REQUEST DEBUG] Transaction ID: {postman_context.get('transaction_id')}")
-            logger.info(f"[INIT REQUEST DEBUG] Context keys: {list(postman_context.keys())}")
-            logger.info(f"[INIT REQUEST DEBUG] Message keys: {list(init_data[0]['message'].keys())}")
-            logger.info(f"[INIT REQUEST DEBUG] Items count: {len(postman_items)}")
-            logger.info(f"[INIT REQUEST DEBUG] Payment type: {init_data[0]['message']['payment']['type']}")
-            logger.info(f"[INIT REQUEST DEBUG] deviceId field: {init_data[0].get('deviceId')}")
-            logger.info(f"[INIT REQUEST DEBUG] Full payload JSON:")
-            logger.info(f"{json.dumps(init_data, indent=2)}")
-            logger.info(f"[INIT REQUEST DEBUG] ===== END INIT PAYLOAD =====")
+            # Log INIT request summary
+            logger.info(f"[CheckoutService] Sending INIT request for session {session.session_id}")
+            logger.info(f"[CheckoutService] Transaction ID: {postman_context.get('transaction_id')}")
             
             # Step 13: Call BIAP INIT API - GUEST MODE
             # Guest mode: No authentication required for order initialization

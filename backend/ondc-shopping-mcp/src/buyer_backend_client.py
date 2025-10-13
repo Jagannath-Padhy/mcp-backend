@@ -54,12 +54,8 @@ class BuyerBackendClient:
         self.limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
         
         logger.info(f"BuyerBackendClient initialized with base_url: {self.base_url}")
-        logger.info(f"[DEBUG] Environment DEBUG_CURL_LOGGING: {os.getenv('DEBUG_CURL_LOGGING', 'NOT_SET')}")
-        logger.info(f"[DEBUG] self.debug_curl value: {self.debug_curl}")
         if self.debug_curl:
-            logger.info("[DEBUG] CURL logging enabled for API calls")
-        else:
-            logger.warning("[DEBUG] CURL logging is DISABLED - no CURL commands will be logged")
+            logger.info("CURL logging enabled for API calls")
     
     def _generate_curl_command(self, method: str, url: str, headers: Dict, 
                                params: Optional[Dict], json_data: Optional[Dict]) -> str:
@@ -112,18 +108,10 @@ class BuyerBackendClient:
         elif require_auth:
             logger.warning(f"Auth required for {endpoint} but no token provided")
         
-        # FORCE CURL logging for debugging - always show for INIT requests
-        force_curl_log = endpoint in ["/v2/initialize_order", "/v2/select"] or self.debug_curl
-        
-        if force_curl_log:
-            logger.info(f"[DEBUG] About to log CURL for {endpoint} - debug_curl: {self.debug_curl}, force: {force_curl_log}")
+        # Log CURL commands for debugging when enabled
+        if self.debug_curl:
             curl_cmd = self._generate_curl_command(method, url, request_headers, params, json_data)
-            logger.info(f"\n{'='*80}")
-            logger.info(f"[CURL DEBUG] API Call to {endpoint}")
-            logger.info(f"[CURL COMMAND]:\n{curl_cmd}")
-            logger.info(f"{'='*80}")
-        else:
-            logger.info(f"[DEBUG] SKIPPING CURL log for {endpoint} - debug_curl: {self.debug_curl}")
+            logger.info(f"CURL: {curl_cmd}")
             
         # Add explicit request logging
         logger.info(f"[REQUEST] {method.upper()} {url}")
@@ -132,6 +120,13 @@ class BuyerBackendClient:
             logger.info(f"[REQUEST] Body: {json.dumps(json_data, indent=2)}")
         if params:
             logger.info(f"[REQUEST] Params: {params}")
+        
+        # Enhanced logging for cart operations
+        if '/cart/' in endpoint:
+            logger.info(f"[CART-API] About to execute {method} {endpoint}")
+            if json_data:
+                logger.info(f"[CART-API] Payload keys: {list(json_data.keys())}")
+                logger.info(f"[CART-API] Full payload: {json_data}")
         
         try:
             async with httpx.AsyncClient(timeout=self.timeout, limits=self.limits) as client:
@@ -146,7 +141,9 @@ class BuyerBackendClient:
                 logger.debug(f"{method.upper()} {url} -> {response.status_code}")
                 
                 # FORCE response logging for debugging
-                force_response_log = endpoint in ["/v2/initialize_order", "/v2/select"] or self.debug_curl
+                force_response_log = (endpoint in ["/v2/initialize_order", "/v2/select"] or 
+                                    '/cart/' in endpoint or  # Force logging for all cart operations
+                                    self.debug_curl)
                 
                 if force_response_log:
                     logger.info(f"[RESPONSE] Status: {response.status_code}")
@@ -173,8 +170,8 @@ class BuyerBackendClient:
                     except json.JSONDecodeError:
                         return {"success": True, "data": response.text}
                 elif response.status_code == 401:
-                    logger.error(f"Unauthorized access to {endpoint}")
-                    return {"error": "Unauthorized", "status_code": 401}
+                    logger.error(f"Unauthorized access to {endpoint}. Check WIL_API_KEY validity or auth token for authenticated endpoints.")
+                    return None  # Return None for HTTP errors to trigger proper error handling
                 elif response.status_code == 400:
                     # Log detailed error for 400 Bad Request
                     error_details = response.text
@@ -183,20 +180,29 @@ class BuyerBackendClient:
                         error_details = json.dumps(error_json, indent=2)
                     except:
                         pass
-                    logger.error(f"HTTP 400 Bad Request for {endpoint}")
-                    logger.error(f"Request data: {json.dumps(json_data, indent=2) if json_data else 'None'}")
-                    logger.error(f"Response: {error_details}")
-                    return {"error": "HTTP 400", "details": error_details, "status_code": 400}
+                    logger.error(f"HTTP 400 Bad Request for {endpoint}. Invalid request format or missing required fields.")
+                    logger.error(f"Request data sent: {json.dumps(json_data, indent=2) if json_data else 'None'}")
+                    logger.error(f"Backend response: {error_details}")
+                    return None  # Return None for HTTP errors to trigger proper error handling
                 elif response.status_code == 404:
-                    logger.warning(f"HTTP 404 for {endpoint}: {response.text}")
-                    return {"error": "HTTP 404", "details": response.text, "status_code": 404}
+                    logger.warning(f"HTTP 404 for {endpoint}: Endpoint not found or resource unavailable. {response.text}")
+                    return None  # Return None for HTTP errors to trigger proper error handling
                 else:
-                    logger.error(f"HTTP {response.status_code} for {endpoint}: {response.text}")
-                    return {"error": f"HTTP {response.status_code}", "details": response.text}
+                    # For all other HTTP error status codes (500, etc.), return None
+                    logger.error(f"HTTP {response.status_code} for {endpoint}: Server error. {response.text}")
+                    # Enhanced logging for cart operations specifically
+                    if '/cart/' in endpoint:
+                        logger.error(f"[CART-API] HTTP {response.status_code} error details:")
+                        try:
+                            error_json = response.json()
+                            logger.error(f"[CART-API] Error response: {json.dumps(error_json, indent=2)}")
+                        except:
+                            logger.error(f"[CART-API] Raw error response: {response.text}")
+                    return None  # Return None to trigger proper error handling in cart service
                     
         except Exception as e:
-            logger.error(f"Request failed for {endpoint}: {e}")
-            return {"error": str(e)}
+            logger.error(f"Network/connection error for {endpoint}: {e}. Check backend availability and network connectivity.")
+            return None  # Return None for connection errors to trigger proper error handling
     
     # ================================
     # SEARCH & DISCOVERY APIs
@@ -312,7 +318,11 @@ class BuyerBackendClient:
     
     async def remove_multiple_cart_items(self, user_id: str, device_id: str, item_ids: List[str]) -> Optional[Dict]:
         """Remove multiple items from cart"""
-        return await self._make_request("DELETE", f"/v2/cart/multiple/{user_id}/{device_id}", json_data={"item_ids": item_ids})
+        payload = {
+            "itemIds": item_ids,  # Fixed: was "item_ids"  
+            "userId": user_id     # Fixed: was missing
+        }
+        return await self._make_request("DELETE", f"/v2/cart/multiple/{user_id}/{device_id}", json_data=payload)
     
     async def clear_cart(self, user_id: str, device_id: str) -> Optional[Dict]:
         """Clear entire cart"""

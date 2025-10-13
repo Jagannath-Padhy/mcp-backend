@@ -9,64 +9,60 @@ logger = get_logger(__name__)
 
 
 def get_persistent_session(session_id: Optional[str] = None, tool_name: str = "unknown", **kwargs):
-    """Get session using agent session_id as single source of truth
+    """Get or create session for MCP tool execution
     
-    When agent provides session_id, use it directly without modification.
-    Store userId/deviceId as session properties, not as session identifiers.
+    This function manages session persistence across MCP tool calls, ensuring
+    cart data and user state is maintained throughout the shopping journey.
     
     Args:
-        session_id: Session ID from agent (used as-is)
+        session_id: Session ID from MCP agent (if provided, used as-is)
         tool_name: Name of the MCP tool calling this function (for logging)
         **kwargs: Additional context including userId/deviceId for session properties
         
     Returns:
-        tuple: (session_obj, None) - None for conversation_manager (removed)
+        tuple: (session_obj, None) - session object and None for compatibility
+        
+    Note:
+        When the agent provides a session_id, it's used directly as the single
+        source of truth. If no session_id is provided, a new session is created.
     """
-    # ENHANCED LOGGING: Track session ID flow for cart persistence debugging
-    logger.info(f"[SESSION FLOW] Tool: {tool_name}")
-    logger.info(f"[SESSION FLOW] Input session_id: {session_id}")
-    logger.info(f"[SESSION FLOW] kwargs keys: {list(kwargs.keys())}")
-    
     from ..services.session_service import get_session_service
     session_service = get_session_service()
     
     if session_id:
-        logger.info(f"[SESSION FLOW] Agent provided session_id: {session_id}")
+        logger.debug(f"[Session] {tool_name} using session_id: {session_id}")
         
-        # ALWAYS use agent session_id as-is (single source of truth)
+        # Use agent session_id as-is (single source of truth)
         session_obj = session_service.get(session_id)
         
         if session_obj is None:
-            logger.warning(f"[SESSION FLOW] Session {session_id} not found in storage, creating new session with provided ID")
             # Create new session with agent's session_id
             session_obj = session_service.create_with_id(session_id)
-            logger.info(f"[SESSION FLOW] ✓ Created new session: {session_obj.session_id}")
+            logger.info(f"[Session] Created new session: {session_obj.session_id}")
         else:
-            logger.info(f"[SESSION FLOW] ✓ Retrieved existing session: {session_obj.session_id}")
-            # Log cart state for debugging
+            # Log cart state for monitoring
             cart_items = len(session_obj.cart.items) if session_obj.cart else 0
-            cart_total = session_obj.cart.total_value if session_obj.cart else 0
-            logger.info(f"[SESSION FLOW] Cart state: {cart_items} items, ₹{cart_total}")
-        
-        logger.info(f"[SESSION FLOW] Tool: {tool_name}, Using agent session: {session_obj.session_id}")
+            logger.debug(f"[Session] Retrieved session with {cart_items} cart items")
     else:
-        logger.warning(f"[SESSION FLOW] No session_id provided by agent! Creating new session")
-        # Only create new session if agent doesn't provide one
+        # Create new session if agent doesn't provide one
         session_obj = session_service.create()
-        logger.info(f"[SESSION FLOW] ✓ Created new auto-generated session: {session_obj.session_id}")
-        logger.warning(f"[SESSION FLOW] WARNING: Tool {tool_name} will work with new session instead of existing cart data")
-    
-    # Final validation logging
-    final_cart_items = len(session_obj.cart.items) if session_obj.cart else 0
-    final_cart_total = session_obj.cart.total_value if session_obj.cart else 0
-    logger.info(f"[SESSION FLOW] Final session {session_obj.session_id} - Cart: {final_cart_items} items, ₹{final_cart_total}")
+        logger.warning(f"[Session] No session_id provided to {tool_name}, created new: {session_obj.session_id}")
     
     return session_obj, None
 
 
 def save_persistent_session(session_obj, conversation_manager):
-    """Simplified helper to save session directly to session service"""
-    # conversation_manager is now None (removed), so save directly to session service
+    """Save session data to persistent storage
+    
+    Args:
+        session_obj: Session object to save
+        conversation_manager: Legacy parameter (ignored for compatibility)
+        
+    Note:
+        The conversation_manager parameter is retained for backward compatibility
+        but is no longer used. Session persistence is handled directly by the
+        session service.
+    """
     from ..services.session_service import get_session_service
     session_service = get_session_service()
     session_service.update(session_obj)

@@ -245,6 +245,32 @@ class Cart:
         """Create Cart from dictionary"""
         items = [CartItem.from_dict(item) for item in data.get('items', [])]
         return cls(items=items)
+    
+    # Dictionary compatibility methods for backward compatibility
+    def get(self, key: str, default: Any = None) -> Any:
+        """Dictionary-like get method for backward compatibility"""
+        if key == 'items':
+            return [item.to_dict() for item in self.items]  # Return dict format for compatibility
+        elif key == 'total_items':
+            return self.total_items
+        elif key == 'total_value':
+            return self.total_value
+        return default
+    
+    def __getitem__(self, key: str) -> Any:
+        """Dictionary-like item access for backward compatibility"""
+        result = self.get(key)
+        if result is None and key in ['items', 'total_items', 'total_value']:
+            raise KeyError(f"'{key}'")
+        return result
+    
+    def keys(self):
+        """Dictionary-like keys method for backward compatibility"""
+        return ['items', 'total_items', 'total_value']
+    
+    def __contains__(self, key: str) -> bool:
+        """Dictionary-like 'in' operator support"""
+        return key in ['items', 'total_items', 'total_value']
 
 
 @dataclass

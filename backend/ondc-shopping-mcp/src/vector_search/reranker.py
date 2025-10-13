@@ -37,18 +37,35 @@ class ResultReranker:
         self.min_score_threshold = 0.15  # Lowered from implicit high threshold
     
     def rerank(self, api_results: List[Dict], vector_results: List[Dict], 
-              query: str) -> List[Dict]:
+              query: str, custom_threshold: Optional[float] = None, 
+              query_intent: str = "unknown") -> List[Dict]:
         """
-        Rerank combined results from multiple sources
+        Rerank combined results from multiple sources with intelligent filtering
         
         Args:
             api_results: Results from API search
             vector_results: Results from vector search
             query: Original search query
+            custom_threshold: Custom relevance threshold from query analysis
+            query_intent: Query intent from analysis (specific, broad, discovery, etc.)
             
         Returns:
-            Reranked list of results
+            Reranked list of results filtered by intelligent threshold
         """
+        # Use custom threshold if provided, otherwise use default
+        effective_threshold = custom_threshold if custom_threshold is not None else self.min_score_threshold
+        
+        # Adjust threshold based on query intent for better filtering
+        if query_intent == "specific":
+            # For specific queries, be more strict about relevance
+            effective_threshold = max(effective_threshold, 0.6)
+        elif query_intent == "discovery":
+            # For discovery queries, be more lenient to show variety
+            effective_threshold = min(effective_threshold, 0.3)
+        elif query_intent == "generic":
+            # For generic queries, use moderate threshold
+            effective_threshold = min(effective_threshold, 0.4)
+        
         # Combine all results
         all_results = self._merge_results(api_results, vector_results)
         
@@ -61,26 +78,29 @@ class ResultReranker:
             score = self._calculate_score(result, query)
             result["rerank_score"] = score
             
-            # Apply minimum score threshold
-            if score >= self.min_score_threshold:
+            # Apply intelligent threshold filtering
+            if score >= effective_threshold:
                 scored_results.append(result)
             else:
                 # Log filtered results for debugging
                 item_name = self._get_item_name(result.get("item", {}))
-                logger.debug(f"Filtered out '{item_name}' (score: {score:.3f} < {self.min_score_threshold})")
+                logger.debug(f"Filtered out '{item_name}' (score: {score:.3f} < {effective_threshold:.3f}, intent: {query_intent})")
         
         # Sort by score (descending)
         scored_results.sort(key=lambda x: x["rerank_score"], reverse=True)
         
-        # Enhanced logging with score distribution
+        # Enhanced logging with score distribution and intelligent filtering info
         if scored_results:
             avg_score = sum(r["rerank_score"] for r in scored_results) / len(scored_results)
             max_score = max(r["rerank_score"] for r in scored_results)
             min_score = min(r["rerank_score"] for r in scored_results)
             logger.info(f"Reranked {len(scored_results)}/{len(all_results)} results for '{query}' "
-                       f"(scores: {min_score:.3f}-{max_score:.3f}, avg: {avg_score:.3f})")
+                       f"(intent: {query_intent}, threshold: {effective_threshold:.3f}, "
+                       f"scores: {min_score:.3f}-{max_score:.3f}, avg: {avg_score:.3f})")
         else:
-            logger.warning(f"All {len(all_results)} results filtered out for '{query}' - scores too low!")
+            logger.warning(f"All {len(all_results)} results filtered out for '{query}' "
+                          f"(intent: {query_intent}, threshold: {effective_threshold:.3f}) - "
+                          f"consider lowering relevance requirements!")
         
         return scored_results
     

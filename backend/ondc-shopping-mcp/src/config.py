@@ -92,6 +92,29 @@ class GuestConfig:
     
     
 @dataclass
+class SearchConfig:
+    """Dynamic search configuration for intelligent result sizing"""
+    # Default result limits
+    min_results: int = 2
+    max_results: int = 25
+    default_limit: int = 10
+    
+    # Relevance thresholds
+    default_relevance_threshold: float = 0.7
+    min_relevance_threshold: float = 0.4
+    max_relevance_threshold: float = 0.9
+    
+    # Feature toggles
+    adaptive_sizing: bool = True
+    query_analysis_enabled: bool = True
+    relevance_filtering: bool = True
+    context_aware: bool = True
+    
+    # Intent-based configurations can be overridden
+    enable_intent_analysis: bool = True
+    
+
+@dataclass
 class LoggingConfig:
     """Logging configuration"""
     level: str = "INFO"
@@ -137,6 +160,21 @@ class Config:
             cache_ttl_seconds=int(os.getenv("CACHE_TTL_SECONDS", "300")),
             max_image_size_mb=float(os.getenv("MAX_IMAGE_SIZE_MB", "0.8")),
             concurrent_searches=int(os.getenv("CONCURRENT_SEARCHES", "5"))
+        )
+        
+        # Dynamic Search Configuration
+        self.search = SearchConfig(
+            min_results=int(os.getenv("SEARCH_MIN_RESULTS", "2")),
+            max_results=int(os.getenv("SEARCH_MAX_RESULTS", "25")),
+            default_limit=int(os.getenv("SEARCH_DEFAULT_LIMIT", "10")),
+            default_relevance_threshold=float(os.getenv("SEARCH_DEFAULT_RELEVANCE", "0.7")),
+            min_relevance_threshold=float(os.getenv("SEARCH_MIN_RELEVANCE", "0.4")),
+            max_relevance_threshold=float(os.getenv("SEARCH_MAX_RELEVANCE", "0.9")),
+            adaptive_sizing=os.getenv("SEARCH_ADAPTIVE_SIZING", "true").lower() == "true",
+            query_analysis_enabled=os.getenv("SEARCH_QUERY_ANALYSIS", "true").lower() == "true",
+            relevance_filtering=os.getenv("SEARCH_RELEVANCE_FILTERING", "true").lower() == "true",
+            context_aware=os.getenv("SEARCH_CONTEXT_AWARE", "true").lower() == "true",
+            enable_intent_analysis=os.getenv("SEARCH_INTENT_ANALYSIS", "true").lower() == "true"
         )
         
         # Payment Mock Configuration - FOR TESTING ONLY
@@ -248,6 +286,16 @@ class Config:
                 "cache_enabled": self.performance.cache_enabled,
                 "cache_ttl_seconds": self.performance.cache_ttl_seconds,
                 "max_image_size_mb": self.performance.max_image_size_mb
+            },
+            "search": {
+                "min_results": self.search.min_results,
+                "max_results": self.search.max_results,
+                "default_limit": self.search.default_limit,
+                "default_relevance_threshold": self.search.default_relevance_threshold,
+                "adaptive_sizing": self.search.adaptive_sizing,
+                "query_analysis_enabled": self.search.query_analysis_enabled,
+                "relevance_filtering": self.search.relevance_filtering,
+                "context_aware": self.search.context_aware
             },
             "payment": {
                 "mock_mode": self.payment.mock_mode,

@@ -7,7 +7,6 @@ we need to persist session state to disk between calls.
 
 import os
 import json
-import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta

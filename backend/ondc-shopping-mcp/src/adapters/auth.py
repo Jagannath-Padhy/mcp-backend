@@ -24,12 +24,7 @@ async def phone_login(phone: str, session_id: Optional[str] = None, **kwargs) ->
         Authentication result with token and user info
     """
     try:
-        # DEBUG: Log all parameters received from Langflow
-        logger.info(f"[DEBUG-SESSION] phone_login called with:")
-        logger.info(f"[DEBUG-SESSION]   phone: {phone}")
-        logger.info(f"[DEBUG-SESSION]   session_id: {session_id}")
-        logger.info(f"[DEBUG-SESSION]   kwargs: {kwargs}")
-        logger.info(f"[DEBUG-SESSION]   kwargs.keys(): {list(kwargs.keys()) if kwargs else 'None'}")
+        logger.info(f"[Auth] Phone login initiated for phone: {phone}")
         
         # Get enhanced session with conversation tracking
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="phone_login", **kwargs)

@@ -174,6 +174,7 @@ async def view_cart(session_id: Optional[str] = None, **kwargs) -> Dict[str, Any
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="view_cart", **kwargs)
         logger.info(f"[Cart] View cart - Session ID: {session_obj.session_id}")
         
+        
         # SYNC: Fetch from backend and sync to local session.cart (the missing piece!)
         logger.info(f"[Cart] Syncing backend cart to local session for display")
         sync_success = await cart_service.sync_backend_to_local_cart(session_obj)
@@ -295,21 +296,81 @@ async def update_cart_quantity(session_id: Optional[str], item_id: str,
 
 
 async def clear_cart(session_id: Optional[str], **kwargs) -> Dict[str, Any]:
-    """MCP adapter for clear_cart"""
+    """MCP adapter for clear_cart - Uses real-time backend data"""
     try:
         # Get enhanced session with conversation tracking
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="clear_cart", **kwargs)
+        logger.info(f"[Cart] Clear cart - Session ID: {session_obj.session_id}")
         
-        # Clear cart using service
-        success, message = await cart_service.clear_cart(session_obj)
+        
+        # Step 1: Get real current cart data from backend first
+        logger.info(f"[Cart] Step 1: Getting real cart data from backend...")
+        try:
+            user_id = session_obj.user_id or "guestUser"
+            device_id = getattr(session_obj, 'device_id', 'device_9bca8c59')
+            backend_cart_data = await cart_service.buyer_app.get_cart(user_id, device_id)
+            logger.info(f"[Cart] Backend cart data retrieved: {len(backend_cart_data) if backend_cart_data else 0} items")
+        except Exception as e:
+            logger.warning(f"[Cart] Failed to get backend cart data: {e}")
+            backend_cart_data = None
+        
+        # Step 2: Use direct backend clear cart API instead of individual item removal
+        if backend_cart_data and isinstance(backend_cart_data, list) and len(backend_cart_data) > 0:
+            logger.info(f"[Cart] Step 2: Found {len(backend_cart_data)} items to clear using direct backend API")
+            user_id = session_obj.user_id or "guestUser"
+            device_id = getattr(session_obj, 'device_id', 'device_9bca8c59')
+            
+            # Use direct backend clear cart API
+            logger.info(f"[Cart] Step 3: Calling backend clear_cart API for user_id: {user_id}, device_id: {device_id}")
+            backend_result = await cart_service.buyer_app.clear_cart(user_id, device_id)
+            
+            if backend_result is not None:
+                success = True
+                message = f" Cart cleared successfully - removed {len(backend_cart_data)} items"
+                logger.info(f"[Cart] Backend clear cart successful: {backend_result}")
+                
+                # Clear local session cart to match backend
+                from ..models.session import Cart
+                session_obj.cart = Cart()
+                
+            else:
+                success = False
+                message = " Failed to clear cart from backend"
+                logger.error(f"[Cart] Backend clear cart failed - returned None")
+        else:
+            # Cart is already empty
+            success = True
+            message = " Your cart is already empty"
+            logger.info(f"[Cart] Cart already empty, no items to clear")
+        
+        # Step 4: Refresh cart view and get real empty cart data
+        logger.info(f"[Cart] Step 4: Refreshing cart view to show real empty state...")
+        cart_view_result = await view_cart(session_id, **kwargs)
+        
+        # Get the final cart summary from the view result
+        final_cart_summary = cart_view_result.get('cart', {})
+        
+        # Send empty cart raw data to frontend via SSE
+        try:
+            raw_data_for_sse = {
+                'cart_items': [],  # Empty cart
+                'cart_summary': final_cart_summary,
+                'biap_specifications': True,
+                'operation': 'clear_cart_complete'
+            }
+            send_raw_data_to_frontend(session_obj.session_id, 'clear_cart', raw_data_for_sse)
+            logger.info(f"[Cart] Empty cart data sent to frontend via SSE")
+        except Exception as e:
+            logger.warning(f"[Cart] Failed to send empty cart data to frontend: {e}")
         
         # Save session with enhanced persistence
         save_persistent_session(session_obj, conversation_manager)
         
         return format_mcp_response(
             success,
-            message,
-            session_obj.session_id
+            message + "\n✅ Cart cleared and refreshed with real backend data",
+            session_obj.session_id,
+            cart=final_cart_summary
         )
         
     except Exception as e:

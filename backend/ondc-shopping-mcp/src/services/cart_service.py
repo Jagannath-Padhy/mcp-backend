@@ -229,35 +229,6 @@ class CartService:
             logger.error(f"Failed to update item quantity: {e}")
             return False, f" Failed to update quantity: {str(e)}"
     
-    async def clear_cart(self, session: Session) -> Tuple[bool, str]:
-        """
-        Clear all items from cart
-        
-        Args:
-            session: User session
-            
-        Returns:
-            Tuple of (success, message)
-        """
-        try:
-            items_count = session.cart.total_items
-            
-            if items_count == 0:
-                return True, "Your cart is already empty"
-            
-            # Clear cart
-            session.cart.clear()
-            
-            # Add to history
-            session.add_to_history('clear_cart', {
-                'items_removed': items_count
-            })
-            
-            return True, f" Cleared {items_count} items from cart"
-            
-        except Exception as e:
-            logger.error(f"Failed to clear cart: {e}")
-            return False, f" Failed to clear cart: {str(e)}"
     
     def get_cart_summary(self, session: Session) -> Dict[str, Any]:
         """
@@ -527,13 +498,33 @@ class CartService:
             device_id = getattr(session, 'device_id', f'mcp_{session.session_id[:8]}')
             
             # Use backend API for multiple removal
+            logger.info(f"[Cart] Calling backend API to remove {len(item_ids)} items for user {user_id}")
             backend_result = await self.buyer_app.remove_multiple_cart_items(user_id, device_id, item_ids)
+            
+            # Check backend result success
+            if backend_result is None:
+                logger.error(f"[Cart] Backend API call failed - returned None")
+                return False, " Failed to remove items from backend"
+            
+            # Log backend response for debugging
+            logger.info(f"[Cart] Backend API response: {backend_result}")
+            
+            # Check if backend operation was successful
+            backend_success = backend_result.get('success', True)  # Default to True for backward compatibility
+            if not backend_success:
+                error_msg = backend_result.get('message', 'Unknown backend error')
+                logger.error(f"[Cart] Backend removal failed: {error_msg}")
+                return False, f" Backend failed to remove items: {error_msg}"
+            
+            # Only proceed if backend succeeded
+            logger.info(f"[Cart] Backend removal successful, updating local state")
             
             # Add to history
             session.add_to_history('remove_multiple_from_cart', {
                 'item_ids': item_ids,
                 'removed_count': removed_count,
-                'item_names': removed_names
+                'item_names': removed_names,
+                'backend_success': True
             })
             
             message = f" Removed {removed_count} items from cart: {', '.join(removed_names[:3])}"

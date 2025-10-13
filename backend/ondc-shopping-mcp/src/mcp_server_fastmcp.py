@@ -39,11 +39,9 @@ IMPORTANT:
 - See mcp_agent_instructions.md for detailed guidance
 """
 
-import asyncio
 import logging
 import time
 from typing import Any, Dict, List, Optional, Union
-from dataclasses import dataclass
 import json
 
 # Official MCP SDK imports
@@ -147,27 +145,17 @@ def extract_raw_data(result, tool_name):
 
 def has_raw_data(result):
     """Check if result contains any raw data worth transmitting"""
-    logger.info(f"[Universal SSE] Checking raw data - Result type: {type(result)}")
-    logger.info(f"[Universal SSE] Result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
-    
     if not isinstance(result, dict) or not result.get('success'):
-        logger.info(f"[Universal SSE] No raw data - not dict or not successful: dict={isinstance(result, dict)}, success={result.get('success') if isinstance(result, dict) else 'N/A'}")
         return False
     
     # Check for products data
     if result.get('products'):
-        logger.info(f"[Universal SSE] Has products data: {len(result.get('products', []))} products")
         return True
         
     # Check for raw_backend_data (cart, orders, etc.)
-    raw_backend_data = result.get('raw_backend_data')
-    logger.info(f"[Universal SSE] raw_backend_data type: {type(raw_backend_data)}, value: {raw_backend_data}")
-    
-    if raw_backend_data:
-        logger.info(f"[Universal SSE] Has raw_backend_data: {len(raw_backend_data) if isinstance(raw_backend_data, list) else 'not list'}")
+    if result.get('raw_backend_data'):
         return True
         
-    logger.info(f"[Universal SSE] No raw data found")
     return False
 
 
@@ -481,16 +469,39 @@ async def search_products(
     query: str,
     category: Optional[str] = None,
     location: Optional[str] = None,
-    max_results: int = 10,
+    max_results: Optional[int] = None,
+    relevance_threshold: Optional[float] = None,
+    adaptive_results: bool = True,
+    context_aware: bool = True,
     userId: Optional[str] = "guestUser",
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
-    """Search for products in the ONDC network."""
+    """Search for products with intelligent result sizing and relevance filtering.
+    
+    Uses AI-driven query analysis to determine optimal result count and relevance filtering.
+    Only returns products that are highly relevant to the search query.
+    
+    Args:
+        query: Search query for products
+        category: Optional category filter
+        location: Optional location preference
+        max_results: Maximum results (optional - auto-determined if not specified)
+        relevance_threshold: Minimum relevance score (optional - auto-determined if not specified) 
+        adaptive_results: Enable intelligent result sizing based on query intent
+        context_aware: Use shopping context for better results
+        userId: User identifier
+        deviceId: Device identifier  
+        session_id: Session identifier
+        
+    Returns:
+        Relevant products with search metadata for optimal user experience
+    """
     return await handle_tool_execution("search_products", search_adapter, ctx,
                                      query=query, category=category, location=location,
-                                     max_results=max_results, userId=userId, deviceId=deviceId,
-                                     session_id=session_id)
+                                     max_results=max_results, relevance_threshold=relevance_threshold,
+                                     adaptive_results=adaptive_results, context_aware=context_aware,
+                                     userId=userId, deviceId=deviceId, session_id=session_id)
 
 @mcp.tool()
 async def advanced_search(

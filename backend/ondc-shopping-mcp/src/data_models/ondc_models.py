@@ -284,34 +284,3 @@ class ONDCDataGenerator:
             }
         ]
     
-    @staticmethod
-    def generate_search_results(query: str = "", count: int = 10) -> List[Dict]:
-        """DEPRECATED: Should not be used - returns empty list
-        
-        This method previously returned mock data but has been deprecated.
-        Real product data should come from the backend API.
-        
-        Args:
-            query: Search query
-            count: Number of results to generate
-            
-        Returns:
-            Empty list - no mock data
-        """
-        # NO MOCK DATA - Always return empty list
-        # Real products must come from backend API
-        return []
-    
-    @staticmethod
-    def get_categories() -> List[Dict]:
-        """DEPRECATED: Should not be used - returns empty list
-        
-        This method previously returned mock categories but has been deprecated.
-        Real categories should come from the backend API.
-        
-        Returns:
-            Empty list - no mock categories
-        """
-        # NO MOCK DATA - Always return empty list
-        # Real categories must come from backend API
-        return []
