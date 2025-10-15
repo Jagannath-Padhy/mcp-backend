@@ -536,9 +536,9 @@ async def browse_categories(
 @mcp.tool()
 async def select_items_for_order(
     ctx: Context,
-    delivery_city: str,
-    delivery_state: str,
-    delivery_pincode: str,
+    delivery_city: Optional[str] = None,
+    delivery_state: Optional[str] = None,
+    delivery_pincode: Optional[str] = None,
     userId: Optional[str] = "guestUser",
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
@@ -548,10 +548,13 @@ async def select_items_for_order(
     This initiates the checkout process by checking delivery availability
     and getting quotes for the items in your cart.
     
+    SMART AUTOMATION: Can be called without parameters to auto-fetch saved addresses.
+    MANUAL MODE: Provide delivery_city, delivery_state, delivery_pincode manually.
+    
     Args:
-        delivery_city: City name (e.g., "Bangalore")
-        delivery_state: State name (e.g., "Karnataka")
-        delivery_pincode: PIN code (e.g., "560001")
+        delivery_city: City name (e.g., "Bangalore") - Optional, will auto-fetch if available
+        delivery_state: State name (e.g., "Karnataka") - Optional, will auto-fetch if available  
+        delivery_pincode: PIN code (e.g., "560001") - Optional, will auto-fetch if available
         userId: User ID (default: guestUser)
         deviceId: Device identifier
         session_id: Session identifier
@@ -567,10 +570,10 @@ async def select_items_for_order(
 @mcp.tool()
 async def initialize_order(
     ctx: Context,
-    customer_name: str,
-    delivery_address: str,
-    phone: str,
-    email: str,
+    customer_name: Optional[str] = None,
+    delivery_address: Optional[str] = None,
+    phone: Optional[str] = None,
+    email: Optional[str] = None,
     payment_method: str = "razorpay",
     city: Optional[str] = None,
     state: Optional[str] = None,
@@ -584,11 +587,14 @@ async def initialize_order(
     Prepares the order with complete billing and shipping information
     after getting delivery quotes from SELECT stage.
     
+    SMART AUTOMATION: Can be called without parameters to auto-extract customer details from saved addresses.
+    MANUAL MODE: Provide customer_name, delivery_address, phone, email manually.
+    
     Args:
-        customer_name: Full name of the customer
-        delivery_address: Complete street address (e.g., "123 Main St, Apt 4B")
-        phone: Contact phone number (10 digits)
-        email: Email address
+        customer_name: Full name of the customer - Optional, will auto-extract if available
+        delivery_address: Complete street address (e.g., "123 Main St, Apt 4B") - Optional, will auto-extract if available
+        phone: Contact phone number (10 digits) - Optional, will auto-extract if available
+        email: Email address - Optional, will auto-extract if available
         payment_method: Payment type - "razorpay", "upi", "card", "netbanking" (COD not supported)
         city: Delivery city (optional - uses SELECT stage data if not provided)
         state: Delivery state (optional - uses SELECT stage data if not provided)

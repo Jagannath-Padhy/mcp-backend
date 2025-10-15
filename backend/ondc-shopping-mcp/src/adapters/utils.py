@@ -276,9 +276,12 @@ def send_raw_data_to_frontend(session_id: str, tool_name: str, raw_data: Dict[st
     try:
         import requests
         import os
+        import time
         
-        # Get API URL from environment
+        # Get configurable API settings from environment
         api_url = os.getenv('API_URL', 'http://localhost:8001')
+        api_timeout = float(os.getenv('API_TIMEOUT', 2.0))
+        retry_attempts = int(os.getenv('API_RETRY_ATTEMPTS', 2))
         
         # Prepare callback data for internal API endpoint
         callback_data = {
@@ -287,11 +290,28 @@ def send_raw_data_to_frontend(session_id: str, tool_name: str, raw_data: Dict[st
             'raw_data': raw_data
         }
         
-        # Send to internal endpoint that manages SSE queues
-        requests.post(f"{api_url}/internal/tool-result", 
-            json=callback_data, timeout=0.5)
+        # Send to internal endpoint with retry logic
+        last_exception = None
+        for attempt in range(retry_attempts):
+            try:
+                response = requests.post(f"{api_url}/internal/tool-result", 
+                    json=callback_data, timeout=api_timeout)
+                response.raise_for_status()  # Raise exception for HTTP errors
+                
+                logger.info(f"[Universal SSE] Sent {tool_name} data for session {session_id} (attempt {attempt + 1})")
+                return  # Success, exit the function
+                
+            except requests.exceptions.RequestException as e:
+                last_exception = e
+                if attempt < retry_attempts - 1:  # Not the last attempt
+                    wait_time = 0.1 * (2 ** attempt)  # Exponential backoff
+                    logger.warning(f"[Universal SSE] Attempt {attempt + 1} failed for {tool_name}, retrying in {wait_time}s: {e}")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"[Universal SSE] All {retry_attempts} attempts failed for {tool_name}: {e}")
         
-        logger.info(f"[Universal SSE] Sent {tool_name} data for session {session_id}")
+        # If we get here, all attempts failed
+        raise last_exception
         
     except Exception as e:
-        logger.warning(f"[Universal SSE] Failed to send {tool_name} data: {e}")
+        logger.warning(f"[Universal SSE] Failed to send {tool_name} data after {retry_attempts} attempts: {e}")

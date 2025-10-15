@@ -505,9 +505,13 @@ class BuyerBackendClient:
                                       json_data=address_data, auth_token=auth_token, require_auth=True)
     
     async def get_delivery_addresses(self, auth_token: str) -> Optional[Dict]:
-        """Get delivery addresses"""
+        """Get delivery addresses (legacy method)"""
         return await self._make_request("GET", "/v1/delivery_address", 
                                       auth_token=auth_token, require_auth=True)
+    
+    async def get_delivery_addresses_by_user(self, user_id: str) -> Optional[Dict]:
+        """Get delivery addresses by user ID - only requires wil-api-key"""
+        return await self._make_request("GET", f"/v1/delivery_address/{user_id}")
     
     async def update_delivery_address(self, address_id: str, address_data: Dict, auth_token: str) -> Optional[Dict]:
         """Update delivery address"""

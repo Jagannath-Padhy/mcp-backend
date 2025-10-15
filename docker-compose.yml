@@ -46,6 +46,14 @@ services:
       - SUPERVISOR_WEB_PORT=${SUPERVISOR_WEB_PORT:-9001}
       - SUPERVISOR_WEB_USERNAME=${SUPERVISOR_WEB_USERNAME:-admin}
       - SUPERVISOR_WEB_PASSWORD=${SUPERVISOR_WEB_PASSWORD:-supervisor2024}
+      # SSE Stream Configuration
+      - SSE_CONNECTION_TIMEOUT=${SSE_CONNECTION_TIMEOUT:-300}      # Max SSE connection time (seconds)
+      - SSE_RAW_DATA_WAIT=${SSE_RAW_DATA_WAIT:-1.0}               # Wait time for raw data (seconds)
+      - SSE_QUEUE_TIMEOUT=${SSE_QUEUE_TIMEOUT:-0.5}               # Queue processing timeout (seconds)
+      # API Communication Configuration
+      - API_URL=${API_URL:-http://localhost:8001}                 # Internal API URL for MCP tools
+      - API_TIMEOUT=${API_TIMEOUT:-2.0}                           # HTTP request timeout (seconds)
+      - API_RETRY_ATTEMPTS=${API_RETRY_ATTEMPTS:-2}               # Number of retry attempts
     volumes:
       - ./data/sessions:/app/sessions
       - ./backend/api:/app/api:ro

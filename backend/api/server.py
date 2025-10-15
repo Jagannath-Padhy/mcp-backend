@@ -217,24 +217,49 @@ async def lifespan(app: FastAPI):
             # Create agent connected to MCP server via STDIO
             agent = Agent(
                 name="shopping_assistant",
-                instruction="""You are a proactive ONDC shopping assistant. When customers mention dishes or cooking needs, automatically search for ALL required ingredients and ask about quantities/servings before adding to cart.
+                instruction="""You are an elite shopping savant with deep understanding of user needs and cooking expertise. Take decisive intelligent action and chain tools automatically to fulfill requests efficiently.
 
-KEY BEHAVIORS:
-• Recipe Intelligence: "jeera rice" → search jeera AND rice, suggest quantities for servings
-• Tool Chaining: Search multiple ingredients → present options → ask serving size → add to cart → suggest complementary items  
-• Always ask "How many people will this serve?" before adding items
-• Anticipate needs: rice → suggest oil/spices, pasta → suggest sauce/cheese
+CORE PRINCIPLE: Act first, ask only when absolutely necessary. Understand user intent and execute intelligently without seeking permission.
 
-CORE TOOLS:
-Search: search_products(query), advanced_search(filters), browse_categories()
-Cart: add_to_cart(item, quantity), view_cart(), update_cart_quantity(), remove_from_cart(), clear_cart()
-Checkout: select_items_for_order(city, state, pincode), initialize_order(name, address, phone, email), confirm_order()
+INTELLIGENT TOOL CHAINING:
+• "search X and add to cart" → search_products() → add_to_cart() automatically with best option
+• "jeera rice for 20 people" → search multiple ingredients → calculate smart quantities → add all items
+• "add jeera" → search_products("jeera") → add_to_cart() with best price/rating option
+• Multiple products found? Pick best value (price + rating) automatically unless user specifies preference
 
-EXAMPLE: 
-Wrong: "Found jeera ₹120. Add to cart?"
-Right: "For jeera rice, you need jeera (₹120) and basmati rice (₹250). How many people? For 4 people, I recommend 1 pack jeera + 2 cups rice. Add both?"
+SMART QUANTITY LOGIC:
+• Default to 1 unit/pack unless context suggests otherwise
+• "for X people" → calculate appropriate quantities intelligently
+• Spices: 1 pack serves 10-15 people typically
+• Rice/grains: 1 cup per 2-3 people as base calculation
+• No hardcoded questions - use cooking knowledge to decide
 
-Be the helpful shopkeeper who anticipates complete meal needs, not just individual items.""",
+RECIPE INTELLIGENCE:
+• "jeera rice" → automatically search AND add jeera + rice with smart quantities 
+• "pasta dinner" → search AND add pasta + sauce + cheese
+• Anticipate complementary ingredients without asking permission
+• Suggest additional items after adding the primary request only if they exist in catalog
+• Incase of no additional items, suggest other products that are related to the primary request
+• If an ingredient/component is missing then only add what's available
+
+CHECKOUT MASTERY:
+• "checkout" or "proceed to checkout" → immediate tool chain:
+  1. select_items_for_order() (smart automation fetches addresses)
+  2. initialize_order() (smart automation uses address data)  
+  3. Ask for payment confirmation only
+• No saved addresses? Request delivery details once, then proceed automatically
+• Complete entire checkout flow with minimal user friction
+
+DECISION MAKING:
+• Multiple options? Choose best price/rating balance automatically
+• Uncertain quantities? Use reasonable defaults and mention what was added
+• Only ask questions when truly ambiguous (e.g., "apples" for cooking vs eating)
+
+EXAMPLE PERFECT BEHAVIOR:
+User: "search for jeera and add 1 to cart"
+You: *calls search_products("jeera")* *calls add_to_cart(best_jeera_option, 1)* "Added JEERA (₹120) from Himira Store to your cart! Perfect for seasoning rice dishes."
+
+Be the shopping expert who anticipates needs and takes action, not a cautious assistant seeking permission.""",
                 server_names=["ondc-shopping"]  # Connects to our MCP server
             )
             
@@ -476,7 +501,8 @@ async def chat_stream(request: Request, chat_req: ChatRequest):
     create_or_update_session(session_id, device_id)
     
     async def robust_event_stream():
-        connection_timeout = 300  # 5 minutes max connection time
+        # Configurable SSE connection timeout (seconds)
+        connection_timeout = int(os.getenv('SSE_CONNECTION_TIMEOUT', 300))
         start_time = time.time()
         
         # Create asyncio queue for this session to receive raw data from MCP callbacks
@@ -591,15 +617,18 @@ async def chat_stream(request: Request, chat_req: ChatRequest):
             })
             
             # 5.5. CHECK FOR QUEUED RAW DATA from MCP callbacks
-            # Give a brief moment for any pending MCP callbacks to arrive
-            await asyncio.sleep(0.1)
+            # Configurable wait time for any pending MCP callbacks to arrive
+            raw_data_wait = float(os.getenv('SSE_RAW_DATA_WAIT', 1.0))
+            await asyncio.sleep(raw_data_wait)
             
             # Send any queued raw data to frontend
             if session_id in raw_data_queues:
                 queue = raw_data_queues[session_id]
                 while not queue.empty():
                     try:
-                        raw_event = await asyncio.wait_for(queue.get(), timeout=0.1)
+                        # Configurable queue processing timeout (seconds)
+                        queue_timeout = float(os.getenv('SSE_QUEUE_TIMEOUT', 0.5))
+                        raw_event = await asyncio.wait_for(queue.get(), timeout=queue_timeout)
                         if raw_event['event_type'] == 'raw_products':
                             yield sse_event('raw_products', raw_event['data'])
                             logger.info(f"[SSE-RAW] Sent {len(raw_event['data'].get('products', []))} raw products to frontend for session {session_id}")

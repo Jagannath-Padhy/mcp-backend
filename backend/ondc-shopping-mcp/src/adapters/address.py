@@ -40,29 +40,22 @@ async def get_delivery_addresses(
         
         logger.info(f"[Address] Get delivery addresses - User: {user_id}, Device: {device_id}")
         
-        # Check authentication for address operations
-        if user_id == "guestUser":
+        # Smart address fetching - works for any user with valid userId
+        if user_id == "guestUser" or not user_id:
             return format_mcp_response(
                 False,
-                "🔐 Address management requires login. Please authenticate first.",
+                "📍 User ID required to fetch delivery addresses.",
                 session_obj.session_id
             )
         
-        if not session_obj.user_authenticated or not session_obj.auth_token:
-            return format_mcp_response(
-                False,
-                "🔐 Please login to view delivery addresses.",
-                session_obj.session_id
-            )
-        
-        # Get addresses from backend
+        # Get addresses from backend using new userId-based endpoint
         from ..buyer_backend_client import BuyerBackendClient
         buyer_app = BuyerBackendClient()
         
-        result = await buyer_app.get_delivery_addresses(session_obj.auth_token)
+        result = await buyer_app.get_delivery_addresses_by_user(user_id)
         
-        if result and not result.get('error'):
-            addresses = result.get('addresses', [])
+        if result and result.get('success', False):
+            addresses = result.get('data', [])
             address_count = len(addresses)
             
             if address_count == 0:
@@ -86,12 +79,14 @@ async def get_delivery_addresses(
                 address_count=address_count
             )
         else:
-            error_msg = result.get('message', 'Failed to fetch addresses') if result else 'Backend error'
-            logger.error(f"[Address] Get addresses failed: {error_msg}")
+            # Gracefully handle no addresses - return empty result instead of error
+            logger.info(f"[Address] No addresses found for user {user_id}")
             return format_mcp_response(
-                False,
-                f"❌ Failed to get addresses: {error_msg}",
-                session_obj.session_id
+                True,
+                "📍 No delivery addresses found for this user.",
+                session_obj.session_id,
+                addresses=[],
+                address_count=0
             )
             
     except Exception as e:

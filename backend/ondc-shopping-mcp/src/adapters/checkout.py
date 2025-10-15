@@ -18,6 +18,94 @@ services = get_services()
 checkout_service = services['checkout_service']
 
 
+async def _fetch_user_addresses(user_id: str, session_id: str) -> Dict[str, Any]:
+    """Helper function to fetch user addresses via address adapter"""
+    try:
+        from .address import get_delivery_addresses
+        result = await get_delivery_addresses(user_id, session_id=session_id)
+        
+        if result.get('success', False) and result.get('addresses'):
+            return {
+                'success': True,
+                'addresses': result['addresses'],
+                'count': result.get('address_count', 0)
+            }
+        else:
+            return {'success': False, 'addresses': [], 'count': 0}
+    except Exception as e:
+        logger.error(f"[Checkout] Failed to fetch addresses: {e}")
+        return {'success': False, 'addresses': [], 'count': 0}
+
+
+def _extract_delivery_location(addresses: list) -> Optional[Dict[str, str]]:
+    """Extract city, state, pincode from addresses (prefer default address)"""
+    if not addresses:
+        return None
+        
+    # Find default address first
+    default_address = None
+    for addr in addresses:
+        if addr.get('defaultAddress', False):
+            default_address = addr
+            break
+    
+    # Use first address if no default
+    if not default_address and addresses:
+        default_address = addresses[0]
+    
+    if default_address and default_address.get('address'):
+        addr_data = default_address['address']
+        return {
+            'city': addr_data.get('city', ''),
+            'state': addr_data.get('state', ''), 
+            'pincode': addr_data.get('areaCode', '')
+        }
+    
+    return None
+
+
+def _extract_customer_details(addresses: list) -> Optional[Dict[str, str]]:
+    """Extract customer details from addresses (prefer default address)"""
+    if not addresses:
+        return None
+        
+    # Find default address first
+    default_address = None
+    for addr in addresses:
+        if addr.get('defaultAddress', False):
+            default_address = addr
+            break
+    
+    # Use first address if no default
+    if not default_address and addresses:
+        default_address = addresses[0]
+    
+    if default_address:
+        descriptor = default_address.get('descriptor', {})
+        address_data = default_address.get('address', {})
+        
+        # Format full address
+        address_parts = []
+        if address_data.get('building'): address_parts.append(address_data['building'])
+        if address_data.get('street'): address_parts.append(address_data['street'])
+        if address_data.get('locality'): address_parts.append(address_data['locality'])
+        if address_data.get('city'): address_parts.append(address_data['city'])
+        if address_data.get('state'): address_parts.append(address_data['state'])
+        if address_data.get('areaCode'): address_parts.append(address_data['areaCode'])
+        
+        return {
+            'customer_name': descriptor.get('name', ''),
+            'phone': descriptor.get('phone', ''),
+            'email': descriptor.get('email', ''),
+            'delivery_address': ', '.join(address_parts) if address_parts else '',
+            'city': address_data.get('city', ''),
+            'state': address_data.get('state', ''),
+            'pincode': address_data.get('areaCode', '')
+        }
+    
+    return None
+
+
 async def select_items_for_order(
     session_id: Optional[str] = None,
     delivery_city: Optional[str] = None,
@@ -49,6 +137,12 @@ async def select_items_for_order(
         # Check if delivery location is available in session or parameters
         session_location = getattr(session_obj, 'delivery_location', None)
         
+        # SMART AUTOMATION DEBUG LOGGING
+        logger.info(f"[SMART CHECKOUT DEBUG] Starting select_items_for_order")
+        logger.info(f"[SMART CHECKOUT DEBUG] user_id: {session_obj.user_id}")
+        logger.info(f"[SMART CHECKOUT DEBUG] session_location: {session_location}")
+        logger.info(f"[SMART CHECKOUT DEBUG] manual params - city: {delivery_city}, state: {delivery_state}, pincode: {delivery_pincode}")
+        
         if session_location and all([
             session_location.get('city'),
             session_location.get('state'),
@@ -59,24 +153,67 @@ async def select_items_for_order(
             delivery_state = session_location['state'] 
             delivery_pincode = session_location['pincode']
             
-            logger.info(f"Using delivery location from session: {delivery_city}, {delivery_state}, {delivery_pincode}")
+            logger.info(f"[SMART CHECKOUT DEBUG] Using delivery location from session: {delivery_city}, {delivery_state}, {delivery_pincode}")
             
         elif not all([delivery_city, delivery_state, delivery_pincode]):
-            # No location in session and parameters not provided
-            return format_mcp_response(
-                False,
-                """ **Delivery Location Required**
+            # Try to auto-fetch addresses for intelligent checkout
+            logger.info(f"[SMART CHECKOUT DEBUG] No manual location provided, starting auto-fetch for user: {session_obj.user_id}")
+            
+            if session_obj.user_id and session_obj.user_id != "guestUser":
+                logger.info(f"[SMART CHECKOUT DEBUG] User is authenticated, fetching addresses...")
+                addresses_result = await _fetch_user_addresses(session_obj.user_id, session_obj.session_id)
+                logger.info(f"[SMART CHECKOUT DEBUG] Address fetch result: success={addresses_result.get('success', False)}, count={addresses_result.get('address_count', 0)}")
+                
+                if addresses_result['success'] and addresses_result['addresses']:
+                    # AUTO-PATH: Extract delivery location from saved address
+                    logger.info(f"[SMART CHECKOUT DEBUG] AUTO-PATH: Found addresses, extracting location...")
+                    location = _extract_delivery_location(addresses_result['addresses'])
+                    logger.info(f"[SMART CHECKOUT DEBUG] Extracted location: {location}")
+                    
+                    if location and all([location['city'], location['state'], location['pincode']]):
+                        delivery_city = location['city']
+                        delivery_state = location['state']
+                        delivery_pincode = location['pincode']
+                        
+                        logger.info(f"[SMART CHECKOUT DEBUG] AUTO-PATH SUCCESS: Using auto-extracted location: {delivery_city}, {delivery_state}, {delivery_pincode}")
+                    else:
+                        # Address found but incomplete location data
+                        logger.warning(f"[SMART CHECKOUT DEBUG] AUTO-PATH FAILED: Address found but incomplete location data: {location}")
+                        return format_mcp_response(
+                            False,
+                            "📍 Found saved address but missing location details. Please provide: city, state, pincode",
+                            session_obj.session_id
+                        )
+                else:
+                    # MANUAL-PATH: No addresses found, ask user
+                    logger.info(f"[SMART CHECKOUT DEBUG] MANUAL-PATH: No addresses found, requesting manual input")
+                    return format_mcp_response(
+                        False,
+                        """📍 **Delivery Location Required**
 
-To get delivery quotes, I need to collect your address first.
+No saved addresses found. Please provide:
+• City (e.g., 'Bangalore')
+• State (e.g., 'Karnataka')  
+• Pincode (e.g., '560001')
 
- **Please use the 'set_delivery_address' tool first:**
-• This will ask for your city, state, and pincode
-• Then you can proceed with getting delivery quotes
-
-Or provide delivery location directly:
-• Format: city='Bangalore', state='Karnataka', pincode='560001'""",
-                session_obj.session_id
-            )
+Format: select_items_for_order(delivery_city='Bangalore', delivery_state='Karnataka', delivery_pincode='560001')""",
+                        session_obj.session_id
+                    )
+            else:
+                # Guest user or no user_id
+                logger.info(f"[SMART CHECKOUT DEBUG] MANUAL-PATH: Guest user or no user_id, requesting manual input")
+                return format_mcp_response(
+                    False,
+                    "📍 **Delivery Location Required**\n\nPlease provide: city, state, pincode",
+                    session_obj.session_id
+                )
+        
+        # Store delivery location in session for reuse
+        session_obj.delivery_location = {
+            'city': delivery_city,
+            'state': delivery_state,
+            'pincode': delivery_pincode
+        }
         
         # Call consolidated checkout service
         result = await checkout_service.select_items_for_order(
@@ -157,6 +294,20 @@ async def initialize_order(
                 session_obj.session_id
             )
         
+        # AUTO-PATH: Try to auto-populate customer details from saved addresses
+        auto_details = None
+        if session_obj.user_id and session_obj.user_id != "guestUser":
+            addresses_result = await _fetch_user_addresses(session_obj.user_id, session_obj.session_id)
+            if addresses_result['success'] and addresses_result.get('addresses'):
+                auto_details = _extract_customer_details(addresses_result['addresses'])
+                if auto_details:
+                    # AUTO-PATH: Use saved customer details
+                    customer_name = customer_name or auto_details.get('customer_name')
+                    delivery_address = delivery_address or auto_details.get('delivery_address')
+                    phone = phone or auto_details.get('phone')
+                    email = email or auto_details.get('email')
+                    logger.info(f"[AUTO-PATH] Populated customer details from saved addresses")
+        
         # Check for required customer information and guide through proper flow
         missing = []
         if not customer_name: missing.append("customer_name")
@@ -165,22 +316,16 @@ async def initialize_order(
         if not email: missing.append("email")
         
         if missing:
+            # MANUAL-PATH: Ask for missing customer details
+            field_list = ''.join([f'• {field.replace("_", " ").title()}\n' for field in missing])
+            if auto_details:
+                message = f"📍 **Additional Details Required**\n\nFound saved address but missing:\n{field_list}Please provide the missing details to proceed."
+            else:
+                message = f"📍 **Customer Details Required**\n\nTo initialize your order, I need:\n{field_list}Provide these details to proceed with order initialization."
+            
             return format_mcp_response(
                 False,
-                f""" **Customer Details Required**
-
-To initialize your order, I need your complete information:
-
- **Missing Details:** {', '.join(missing)}
-
- **Please provide:**
-• **Customer Name:** Your full name
-• **Delivery Address:** Complete street address
-• **Phone:** Contact number (e.g., 9876543210)
-• **Email:** Email address
-
- **Or call this tool with all details:**
-• Format: customer_name='John Doe', delivery_address='123 Main St Apartment 4B', phone='9876543210', email='user@example.com'""",
+                message,
                 session_obj.session_id
             )
         
