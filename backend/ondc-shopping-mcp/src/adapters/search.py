@@ -7,7 +7,8 @@ from .utils import (
     save_persistent_session, 
     extract_session_id, 
     format_mcp_response,
-    get_services
+    get_services,
+    send_raw_data_to_frontend
 )
 from ..utils.logger import get_logger
 from ..utils.field_mapper import enhance_for_mcp
@@ -47,11 +48,17 @@ async def search_products(session_id: Optional[str] = None, query: str = '',
         if delivery_location and delivery_location.get('pincode'):
             session_pincode = delivery_location['pincode']
         
-        # Simple search call with agent-specified parameters
+        # Enhanced search with intelligent query processing
         results = await search_service.search_products(
             query, latitude, longitude, page, limit, session_pincode,
             relevance_threshold=relevance_threshold
         )
+        
+        # If no good results found, let agent try variations naturally
+        search_results = results.get('search_results', [])
+        if not search_results or len(search_results) < 2:
+            # Agent will naturally suggest variations like "basmati rice" for "rice"
+            logger.info(f"[Search] Limited results for '{query}' - agent will suggest variations")
         
         # Extract and format products
         products = []
@@ -92,6 +99,27 @@ async def search_products(session_id: Optional[str] = None, query: str = '',
         
         # Save session with enhanced persistence
         save_persistent_session(session_obj, conversation_manager)
+        
+        # Send raw product data to frontend via SSE stream
+        if products:
+            raw_data_for_sse = {
+                'products': products,
+                'total_results': results.get('total_results', 0),
+                'search_type': results.get('search_type', 'hybrid'),
+                'page': results.get('page', 1),
+                'page_size': results.get('page_size', limit),
+                'search_metadata': {
+                    'original_query': query,
+                    'limit_requested': limit,
+                    'relevance_threshold': relevance_threshold,
+                    'results_returned': len(products),
+                    'search_timestamp': datetime.utcnow().isoformat(),
+                    'session_id': session_obj.session_id
+                }
+            }
+            
+            send_raw_data_to_frontend(session_obj.session_id, 'search_products', raw_data_for_sse)
+            logger.info(f"[Search] Sent {len(products)} products with query '{query}' to SSE stream")
         
         return format_mcp_response(
             results.get('success', True),

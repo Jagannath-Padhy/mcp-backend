@@ -12,6 +12,7 @@ class CheckoutStage(Enum):
     NONE = "none"
     SELECT = "select"           # ONDC SELECT step - items selected, quote received
     INIT = "init"              # ONDC INIT step - order initialized with delivery info
+    PAYMENT_PENDING = "payment_pending"  # Payment order created, waiting for user payment
     CONFIRMED = "confirmed"     # ONDC CONFIRM step - order confirmed
 
 

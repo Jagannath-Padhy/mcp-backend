@@ -957,25 +957,31 @@ class CheckoutService:
                     logger.info(f"[MOCK PAYMENT CREATION] Payment ID: {mock_payment['razorpayPaymentId']}")
                     logger.info(f"[MOCK PAYMENT CREATION] Amount: {total_amount} INR")
                 
-                # Update session with payment information
+                # Update session with payment information and move to PAYMENT_PENDING stage
                 session.checkout_state.payment_id = mock_payment['razorpayPaymentId']
+                session.checkout_state.payment_status = "pending"  # Set to pending - waiting for user payment
+                session.checkout_state.stage = CheckoutStage.PAYMENT_PENDING  # Move to payment pending stage
                 
                 return {
                     'success': True,
-                    'message': f' [MOCK] Payment created successfully',
+                    'message': f' [MOCK] Payment order created! Please complete payment to proceed.',
                     'data': {
                         'payment_id': mock_payment['razorpayPaymentId'],  # MOCK: From Postman
                         'order_id': mock_order['id'],  # MOCK: Generated
                         'amount': total_amount,
                         'currency': 'INR',
-                        'status': 'created',
+                        'status': 'pending',  # Status is pending - waiting for user payment
+                        'razorpay_order_id': mock_order['id'],  # For frontend integration
                         '_mock_indicators': {
                             'payment_mode': 'MOCK_TESTING',
                             'source': 'himira_postman_collection',
-                            'payment_id': mock_payment['razorpayPaymentId']
+                            'payment_id': mock_payment['razorpayPaymentId'],
+                            'requires_user_payment': True
                         }
                     },
-                    'next_step': 'confirm_order'
+                    'next_step': 'verify_payment',  # Changed from confirm_order
+                    'stage': 'payment_pending',
+                    'user_action_required': 'Complete payment using Razorpay SDK on frontend'
                 }
             else:
                 # Real payment implementation would go here
@@ -1009,11 +1015,27 @@ class CheckoutService:
         Returns:
             Final order confirmation with order ID
         """
-        # Validate session is in INIT stage
-        if session.checkout_state.stage != CheckoutStage.INIT:
+        # Validate session is in PAYMENT_PENDING stage (payment must be verified first)
+        if session.checkout_state.stage != CheckoutStage.PAYMENT_PENDING:
+            if session.checkout_state.stage == CheckoutStage.INIT:
+                return {
+                    'success': False,
+                    'message': ' Please create payment first using create_payment, then verify payment before confirming order.'
+                }
+            else:
+                return {
+                    'success': False,
+                    'message': f' Cannot confirm order. Session is in {session.checkout_state.stage.value} stage, expected PAYMENT_PENDING.'
+                }
+        
+        # Validate payment has been verified and is successful
+        successful_payment_statuses = ['paid', 'success', 'captured', 'authorized']
+        current_payment_status = session.checkout_state.payment_status or 'none'
+        
+        if current_payment_status.lower() not in successful_payment_statuses:
             return {
                 'success': False,
-                'message': ' Please complete delivery and payment details first.'
+                'message': f' Payment verification required. Current payment status: {current_payment_status}. Please complete payment and verify using verify_payment before confirming order.'
             }
         
         # Validate required data is present

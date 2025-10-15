@@ -415,6 +415,7 @@ async def create_payment(
                 f"Status: {result['data']['status']}\n\n"
                 f" Ready for order confirmation. Use 'confirm_order' next.",
                 session_obj.session_id,
+                stage=result.get('stage'),  # Add stage field from checkout service
                 payment_data=result['data'],
                 next_step=result['next_step'],
                 _mock_indicators=result['data'].get('_mock_indicators', {})

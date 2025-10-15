@@ -80,6 +80,10 @@ from .adapters.checkout import (
     create_payment as payment_adapter,
     confirm_order as confirm_adapter
 )
+from .adapters.payment import (
+    verify_payment as verify_payment_adapter,
+    get_payment_status as payment_status_adapter
+)
 
 # GUEST MODE ONLY - Authentication disabled
 # from .adapters.auth import phone_login as auth_adapter
@@ -261,6 +265,25 @@ async def handle_tool_execution(tool_name: str, adapter_func, ctx: Context, **kw
         }
         mcp_ops_logger.log_tool_request(tool_name, session_id, request_data)
         
+        # Send real-time tool execution start event to SSE stream
+        if session_id:
+            try:
+                import requests
+                import os
+                from datetime import datetime
+                api_url = os.getenv('API_URL', 'http://localhost:8001')
+                tool_start_data = {
+                    'session_id': session_id,
+                    'event_type': 'tool_start',
+                    'tool_name': tool_name,
+                    'message': f"Executing {tool_name}...",
+                    'timestamp': datetime.now().isoformat()
+                }
+                requests.post(f"{api_url}/internal/tool-event", json=tool_start_data, timeout=0.5)
+                logger.debug(f"[SSE] Sent tool_start event for {tool_name}")
+            except Exception as e:
+                logger.debug(f"[SSE] Failed to send tool_start event: {e}")
+        
         # Basic logging (keep existing for backward compatibility)
         logger.info(f"[{tool_name}] Executing with session: {session_id}")
         logger.debug(f"[{tool_name}] Parameters: {json.dumps(kwargs, indent=2, default=str)}")
@@ -287,6 +310,27 @@ async def handle_tool_execution(tool_name: str, adapter_func, ctx: Context, **kw
         mcp_ops_logger.log_tool_response(
             tool_name, session_id, result_data, execution_time_ms, backend_calls, "success"
         )
+        
+        # Send real-time tool execution completion event to SSE stream
+        if session_id:
+            try:
+                import requests
+                import os
+                from datetime import datetime
+                api_url = os.getenv('API_URL', 'http://localhost:8001')
+                tool_complete_data = {
+                    'session_id': session_id,
+                    'event_type': 'tool_complete',
+                    'tool_name': tool_name,
+                    'message': f"Completed {tool_name} in {execution_time_ms:.0f}ms",
+                    'execution_time_ms': execution_time_ms,
+                    'success': True,
+                    'timestamp': datetime.now().isoformat()
+                }
+                requests.post(f"{api_url}/internal/tool-event", json=tool_complete_data, timeout=0.5)
+                logger.debug(f"[SSE] Sent tool_complete event for {tool_name}")
+            except Exception as e:
+                logger.debug(f"[SSE] Failed to send tool_complete event: {e}")
         
         # Basic logging (keep existing for backward compatibility)
         logger.info(f"[{tool_name}] Execution successful in {execution_time_ms:.2f}ms")
@@ -624,6 +668,46 @@ async def create_payment(
     """Create payment for the order."""
     return await handle_tool_execution("create_payment", payment_adapter, ctx,
                                      payment_method=payment_method, amount=amount,
+                                     userId=userId, deviceId=deviceId, session_id=session_id)
+
+@mcp.tool()
+async def verify_payment(
+    ctx: Context,
+    payment_status: str,
+    payment_id: Optional[str] = None,
+    razorpay_payment_id: Optional[str] = None,
+    userId: Optional[str] = "guestUser",
+    deviceId: Optional[str] = None,
+    session_id: Optional[str] = None
+) -> str:
+    """Verify payment status after user completes payment via frontend Razorpay SDK.
+    
+    Call this after the user completes payment on the frontend to update the session
+    with the payment status. Required before order confirmation.
+    
+    Args:
+        payment_status: Payment status ('PAID', 'SUCCESS', 'FAILED', 'PENDING')
+        payment_id: Payment ID from create_payment response (optional)
+        razorpay_payment_id: Actual Razorpay payment ID from frontend (optional)
+    """
+    return await handle_tool_execution("verify_payment", verify_payment_adapter, ctx,
+                                     payment_status=payment_status, payment_id=payment_id,
+                                     razorpay_payment_id=razorpay_payment_id,
+                                     userId=userId, deviceId=deviceId, session_id=session_id)
+
+@mcp.tool()
+async def get_payment_status(
+    ctx: Context,
+    userId: Optional[str] = "guestUser", 
+    deviceId: Optional[str] = None,
+    session_id: Optional[str] = None
+) -> str:
+    """Get current payment status for the session.
+    
+    Returns the current payment status, payment ID, and next action required.
+    Useful for checking payment state during the checkout flow.
+    """
+    return await handle_tool_execution("get_payment_status", payment_status_adapter, ctx,
                                      userId=userId, deviceId=deviceId, session_id=session_id)
 
 @mcp.tool()

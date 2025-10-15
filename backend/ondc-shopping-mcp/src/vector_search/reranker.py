@@ -34,11 +34,10 @@ class ResultReranker:
         }
         
         # Minimum score threshold - products below this are filtered out
-        self.min_score_threshold = 0.15  # Lowered from implicit high threshold
+        self.min_score_threshold = 0.4  # Increased for better relevance filtering
     
     def rerank(self, api_results: List[Dict], vector_results: List[Dict], 
-              query: str, custom_threshold: Optional[float] = None, 
-              query_intent: str = "unknown") -> List[Dict]:
+              query: str, custom_threshold: Optional[float] = None) -> List[Dict]:
         """
         Rerank combined results from multiple sources with intelligent filtering
         
@@ -46,25 +45,13 @@ class ResultReranker:
             api_results: Results from API search
             vector_results: Results from vector search
             query: Original search query
-            custom_threshold: Custom relevance threshold from query analysis
-            query_intent: Query intent from analysis (specific, broad, discovery, etc.)
+            custom_threshold: Custom relevance threshold
             
         Returns:
-            Reranked list of results filtered by intelligent threshold
+            Reranked list of results filtered by relevance threshold
         """
         # Use custom threshold if provided, otherwise use default
         effective_threshold = custom_threshold if custom_threshold is not None else self.min_score_threshold
-        
-        # Adjust threshold based on query intent for better filtering
-        if query_intent == "specific":
-            # For specific queries, be more strict about relevance
-            effective_threshold = max(effective_threshold, 0.6)
-        elif query_intent == "discovery":
-            # For discovery queries, be more lenient to show variety
-            effective_threshold = min(effective_threshold, 0.3)
-        elif query_intent == "generic":
-            # For generic queries, use moderate threshold
-            effective_threshold = min(effective_threshold, 0.4)
         
         # Combine all results
         all_results = self._merge_results(api_results, vector_results)
@@ -84,7 +71,7 @@ class ResultReranker:
             else:
                 # Log filtered results for debugging
                 item_name = self._get_item_name(result.get("item", {}))
-                logger.debug(f"Filtered out '{item_name}' (score: {score:.3f} < {effective_threshold:.3f}, intent: {query_intent})")
+                logger.debug(f"Filtered out '{item_name}' (score: {score:.3f} < {effective_threshold:.3f})")
         
         # Sort by score (descending)
         scored_results.sort(key=lambda x: x["rerank_score"], reverse=True)
@@ -95,11 +82,11 @@ class ResultReranker:
             max_score = max(r["rerank_score"] for r in scored_results)
             min_score = min(r["rerank_score"] for r in scored_results)
             logger.info(f"Reranked {len(scored_results)}/{len(all_results)} results for '{query}' "
-                       f"(intent: {query_intent}, threshold: {effective_threshold:.3f}, "
+                       f"(threshold: {effective_threshold:.3f}, "
                        f"scores: {min_score:.3f}-{max_score:.3f}, avg: {avg_score:.3f})")
         else:
             logger.warning(f"All {len(all_results)} results filtered out for '{query}' "
-                          f"(intent: {query_intent}, threshold: {effective_threshold:.3f}) - "
+                          f"(threshold: {effective_threshold:.3f}) - "
                           f"consider lowering relevance requirements!")
         
         return scored_results
@@ -320,6 +307,8 @@ class ResultReranker:
             'might', 'must', 'can', 'this', 'that', 'these', 'those'
         }
         
+        # LLM-based relevance validation will be handled at service level
+        
         # Filter out stop words and get important tokens
         important_tokens = [token for token in query_tokens if token not in stop_words and len(token) > 2]
         
@@ -340,11 +329,7 @@ class ResultReranker:
             elif token_coverage >= 0.3:  # 30% coverage - minimal boost
                 total_score = min(total_score * 1.1, 1.0)
         
-        # Ensure minimum score for high-quality vector matches
-        # If vector search found it with good score, don't filter it out completely
-        vector_score = item.get('_vector_score', 0.0)
-        if vector_score > 0.5 and total_score < 0.2:
-            total_score = max(total_score, 0.3)  # Minimum score for good vector matches
+        # Removed artificial vector score boosting to prevent irrelevant results
         
         return total_score
     
@@ -480,3 +465,4 @@ class ResultReranker:
                 return str(name)
                 
         return "Unknown Item"
+    

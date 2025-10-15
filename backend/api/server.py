@@ -59,7 +59,10 @@ TOOL_EVENT_MAPPING = {
     'select_items_for_order': 'raw_checkout',
     'initialize_order': 'raw_checkout',
     'confirm_order': 'raw_checkout',
-    'create_payment': 'raw_checkout',
+    'create_payment': 'raw_payment',
+    # Payment verification tools
+    'verify_payment': 'raw_payment',
+    'get_payment_status': 'raw_payment',
     # Future tools can be added here
     # 'get_order_history': 'raw_orders',
     # 'get_delivery_addresses': 'raw_addresses',
@@ -93,6 +96,15 @@ def create_sse_event(tool_name, raw_data, session_id):
             'cart_items': raw_data.get('cart_items', []),
             'cart_summary': raw_data.get('cart_summary', {})
         })
+    elif tool_name in ['create_payment', 'verify_payment', 'get_payment_status']:
+        event_data.update({
+            'payment_status': raw_data.get('payment_status', 'unknown'),
+            'payment_id': raw_data.get('payment_id'),
+            'payment_verification': raw_data.get('payment_verification'),
+            'razorpay_order_id': raw_data.get('razorpay_order_id'),
+            'next_step': raw_data.get('next_step'),
+            'user_action_required': raw_data.get('user_action_required')
+        })
     else:
         # Generic data structure for future tools
         event_data.update(raw_data)
@@ -110,6 +122,10 @@ def get_log_message(tool_name, raw_data):
         cart_data = raw_data.get('cart_items', [])
         cart_count = len(cart_data) if isinstance(cart_data, list) else "dict"
         return f"[RAW-DATA] Queued cart data ({cart_count} items) for SSE stream"
+    elif tool_name in ['create_payment', 'verify_payment', 'get_payment_status']:
+        payment_status = raw_data.get('payment_status', 'unknown')
+        payment_id = raw_data.get('payment_id', 'none')
+        return f"[RAW-DATA] Queued payment data (status: {payment_status}, id: {payment_id}) for SSE stream"
     else:
         return f"[RAW-DATA] Queued {tool_name} data for SSE stream"
 
@@ -221,6 +237,14 @@ async def lifespan(app: FastAPI):
 
 CORE PRINCIPLE: Act first, ask only when absolutely necessary. Understand user intent and execute intelligently without seeking permission.
 
+🚨 CRITICAL FUNCTION CALLING RULE 🚨
+NEVER claim to have performed actions without ACTUALLY calling the functions! You MUST:
+• ACTUALLY call search_products() before claiming you searched
+• ACTUALLY call add_to_cart() before claiming you added items
+• NEVER say "I've added" or "I found" without executing the actual tool
+• IF tools fail to execute, acknowledge the issue and try again
+• The system will detect if you claim actions without function calls - this is forbidden
+
 INTELLIGENT TOOL CHAINING:
 • "search X and add to cart" → search_products() → add_to_cart() automatically with best option
 • "jeera rice for 20 people" → search multiple ingredients → calculate smart quantities → add all items
@@ -253,13 +277,38 @@ CHECKOUT MASTERY:
 DECISION MAKING:
 • Multiple options? Choose best price/rating balance automatically
 • Uncertain quantities? Use reasonable defaults and mention what was added
+• ALWAYS auto-add for clear requests: "i need haldi" → search + add_to_cart automatically
+• NEVER ask "would you like to add" - just add the best option and report what you did
 • Only ask questions when truly ambiguous (e.g., "apples" for cooking vs eating)
+• Context like "haldi ceremony" makes intent crystal clear - auto-add immediately
+
+TRANSPARENCY & COMMUNICATION:
+• BE VERY VERBOSE about your step-by-step process as you work
+• Think out loud: "Let me search for jeera first..." → ACTUALLY call search_products() → "Found great options! Adding best one..." → ACTUALLY call add_to_cart()
+• Stream your thinking: "I'll help you make jeera rice. First searching for jeera..." → "Perfect! Now looking for rice..."
+• ALWAYS explicitly mention what you searched for and what you found
+• ALWAYS report what actions you took (added to cart, proceeded to checkout, etc.)
+• Show your intelligence: "I searched for jeera and found 2 options. Added the best one (₹120) to your cart."
+• For multi-ingredient recipes, mention all ingredients you handled step by step
+• Be conversational and talk through your process like a helpful friend
 
 EXAMPLE PERFECT BEHAVIOR:
 User: "search for jeera and add 1 to cart"
-You: *calls search_products("jeera")* *calls add_to_cart(best_jeera_option, 1)* "Added JEERA (₹120) from Himira Store to your cart! Perfect for seasoning rice dishes."
+You: "Let me search for jeera first..." *ACTUALLY calls search_products("jeera")* "Found 2 jeera options! Now adding the best one to your cart..." *ACTUALLY calls add_to_cart(best_jeera_option, 1)* "Perfect! I've added JEERA (₹120) from Himira Store to your cart!"
 
-Be the shopping expert who anticipates needs and takes action, not a cautious assistant seeking permission.""",
+User: "i need to make jeera rice"
+You: "I'll help you make jeera rice! Let me search for jeera first..." *ACTUALLY calls search_products("jeera")* "Found excellent jeera options! Adding the best one to your cart..." *ACTUALLY calls add_to_cart(jeera, 1)* "Great! Now let me search for rice..." *ACTUALLY calls search_products("rice")* "I've successfully added jeera to your cart (₹120). For rice, let me check what's available..."
+
+User: "i need some haldi for haldi ceremony"
+You: "Perfect! Let me find haldi for your ceremony..." *ACTUALLY calls search_products("haldi")* "Found excellent turmeric options! Adding the best one to your cart..." *ACTUALLY calls add_to_cart(best_haldi, 1)* "Excellent! I've added Turmeric (₹120) from Himira Store to your cart - perfect for your haldi ceremony!"
+
+🔧 EXECUTION VERIFICATION:
+• Always verify your function calls executed successfully
+• If a function doesn't execute, acknowledge it: "I'm having trouble with the search tool, let me try again..."
+• Never claim success without actual tool execution
+• The backend monitors for false claims and will flag hallucination
+
+Be the shopping expert who ACTUALLY takes action and clearly communicates what you did.""",
                 server_names=["ondc-shopping"]  # Connects to our MCP server
             )
             
@@ -368,6 +417,44 @@ async def receive_tool_result(tool_data: dict):
     
     return {"status": "received"}
 
+# Internal tool event endpoint for real-time tool execution events
+@app.post("/internal/tool-event")
+async def receive_tool_event(event_data: dict):
+    """Internal endpoint for MCP server to send real-time tool execution events"""
+    session_id = event_data.get('session_id')
+    event_type = event_data.get('event_type')
+    tool_name = event_data.get('tool_name')
+    message = event_data.get('message')
+    
+    logger.debug(f"[TOOL-EVENT] {event_type} for {tool_name} in session {session_id}")
+    
+    # Send tool event to active SSE streams
+    if session_id and session_id in raw_data_queues:
+        try:
+            # Create tool execution event
+            tool_event = {
+                'event_type': event_type,
+                'data': {
+                    'type': event_type,
+                    'tool_name': tool_name,
+                    'message': message,
+                    'session_id': session_id,
+                    'timestamp': event_data.get('timestamp'),
+                    'execution_time_ms': event_data.get('execution_time_ms'),
+                    'success': event_data.get('success')
+                }
+            }
+            
+            # Put tool event into the session's queue for SSE streaming
+            await raw_data_queues[session_id].put(tool_event)
+            
+            logger.debug(f"[TOOL-EVENT] Queued {event_type} event for {tool_name} in session {session_id}")
+            
+        except Exception as e:
+            logger.error(f"[TOOL-EVENT] Failed to queue tool event for session {session_id}: {e}")
+    
+    return {"status": "received"}
+
 # Health check
 @app.get("/health")
 @limiter.limit("60/minute")
@@ -426,61 +513,107 @@ def sse_event(event_type: str, data: dict) -> str:
     """Format SSE event with proper structure"""
     return f"data: {json.dumps({'type': event_type, **data})}\n\n"
 
-def is_search_request(message: str) -> bool:
-    """Check if message is a search request"""
-    search_keywords = ['search', 'find', 'look for', 'show me', 'get me']
-    return any(keyword in message.lower() for keyword in search_keywords)
-
-def is_cart_request(message: str) -> bool:
-    """Check if message is a cart operation"""
-    cart_keywords = ['add to cart', 'cart', 'add', 'remove', 'delete']
-    return any(keyword in message.lower() for keyword in cart_keywords)
+# Removed hardcoded detection functions - agent should naturally understand requests
 
 def process_mcp_results(contents) -> tuple:
-    """Process MCP results and extract structured data"""
+    """Process MCP results and extract structured data with hallucination detection"""
     response_text = ""
     structured_data = None
     context_type = None
     action_required = False
+    function_calls_detected = False
+    
+    # Debug logging to identify truncation issue
+    logger.info(f"[DEBUG] process_mcp_results called with contents type: {type(contents)}, length: {len(contents) if contents else 0}")
     
     # Process MCP agent response structure
     if contents and len(contents) > 0:
-        for content in contents:
+        for i, content in enumerate(contents):
+            logger.info(f"[DEBUG] Content {i}: type={type(content)}, has_parts={hasattr(content, 'parts')}")
             if hasattr(content, 'parts') and content.parts:
-                for part in content.parts:
-                    if hasattr(part, 'text') and part.text:
-                        response_text += part.text
-                    elif hasattr(part, 'function_response'):
-                        # Try different ways to access the structured data
-                        tool_result = None
-                        if hasattr(part.function_response, 'content'):
-                            try:
-                                if isinstance(part.function_response.content, str):
-                                    tool_result = json.loads(part.function_response.content)
-                                else:
-                                    tool_result = part.function_response.content
-                            except (json.JSONDecodeError, AttributeError) as e:
-                                logger.debug(f"Failed to parse content: {e}")
-                        elif hasattr(part.function_response, 'result'):
-                            tool_result = part.function_response.result
-                        elif isinstance(part.function_response, dict):
-                            tool_result = part.function_response
+                logger.info(f"[DEBUG] Content {i} has {len(content.parts)} parts")
+                for j, part in enumerate(content.parts):
+                    logger.info(f"[DEBUG] Part {j}: has_text={hasattr(part, 'text')}, has_function_response={hasattr(part, 'function_response')}")
+                    
+                    # Check text content
+                    if hasattr(part, 'text'):
+                        if part.text:
+                            text_preview = part.text[:100] + "..." if len(part.text) > 100 else part.text
+                            logger.info(f"[DEBUG] Part {j} text ({len(part.text)} chars): {text_preview}")
+                            response_text += part.text
                         else:
-                            try:
-                                tool_result = dict(part.function_response)
-                            except:
-                                logger.debug("Could not extract structured data from function_response")
-                        
-                        if tool_result and isinstance(tool_result, dict):
-                            structured_data = tool_result
-                            context_type, action_required = determine_context_type(tool_result)
+                            logger.info(f"[DEBUG] Part {j} has text attribute but text is empty/None")
+                    
+                    # Check function response (separate from text - both can exist)
+                    if hasattr(part, 'function_response'):
+                        if part.function_response is not None:
+                            function_calls_detected = True
+                            logger.info(f"[DEBUG] Part {j} has function_response: {type(part.function_response)}")
+                            # Try different ways to access the structured data
+                            tool_result = None
+                            if hasattr(part.function_response, 'content'):
+                                logger.info(f"[DEBUG] function_response has content: {type(part.function_response.content)}")
+                                try:
+                                    if isinstance(part.function_response.content, str):
+                                        tool_result = json.loads(part.function_response.content)
+                                        logger.info(f"[DEBUG] Parsed JSON content: {str(tool_result)[:200]}...")
+                                    else:
+                                        tool_result = part.function_response.content
+                                        logger.info(f"[DEBUG] Direct content: {str(tool_result)[:200]}...")
+                                except (json.JSONDecodeError, AttributeError) as e:
+                                    logger.warning(f"[DEBUG] Failed to parse content: {e}")
+                            elif hasattr(part.function_response, 'result'):
+                                logger.info(f"[DEBUG] function_response has result: {type(part.function_response.result)}")
+                                tool_result = part.function_response.result
+                            elif isinstance(part.function_response, dict):
+                                logger.info(f"[DEBUG] function_response is dict: {str(part.function_response)[:200]}...")
+                                tool_result = part.function_response
+                            else:
+                                logger.info(f"[DEBUG] Trying to convert function_response to dict")
+                                try:
+                                    tool_result = dict(part.function_response)
+                                    logger.info(f"[DEBUG] Converted to dict: {str(tool_result)[:200]}...")
+                                except Exception as e:
+                                    logger.warning(f"[DEBUG] Could not extract structured data from function_response: {e}")
+                            
+                            if tool_result and isinstance(tool_result, dict):
+                                logger.info(f"[DEBUG] Setting structured_data from tool_result")
+                                structured_data = tool_result
+                                context_type, action_required = determine_context_type(tool_result)
+                                logger.info(f"[DEBUG] Context type: {context_type}, action_required: {action_required}")
+                        else:
+                            logger.warning(f"[DEBUG] Part {j} has function_response attribute but value is None - possible hallucination")
     
+    # CRITICAL: Detect agent hallucination
+    # Check if agent claims to have performed actions without function calls
+    hallucination_indicators = [
+        "added to cart", "added", "i've added", "adding", 
+        "searched for", "found", "i found", "searching",
+        "proceeding", "proceeded", "checkout", "payment"
+    ]
+    
+    response_lower = response_text.lower()
+    claims_action = any(indicator in response_lower for indicator in hallucination_indicators)
+    
+    if claims_action and not function_calls_detected:
+        logger.error(f"[HALLUCINATION-DETECTED] Agent claims action but no function calls detected!")
+        logger.error(f"[HALLUCINATION-DETECTED] Response text: {response_text}")
+        # Add warning to response
+        response_text = "⚠️ I encountered an issue executing tools. Let me try again...\n\n" + response_text
+    elif function_calls_detected:
+        logger.info(f"[FUNCTION-CALLS] Verified function calls were executed properly")
     
     # Clean up response text
     if response_text.startswith("None"):
         response_text = response_text[4:]
     
     response_text = response_text or "I'm ready to help you with your shopping needs!"
+    
+    # Final debug logging
+    logger.info(f"[DEBUG] Final response_text ({len(response_text)} chars): {response_text[:200]}{'...' if len(response_text) > 200 else ''}")
+    logger.info(f"[DEBUG] structured_data present: {structured_data is not None}")
+    logger.info(f"[DEBUG] context_type: {context_type}")
+    logger.info(f"[DEBUG] function_calls_detected: {function_calls_detected}")
     
     return response_text, structured_data, context_type, action_required
 
@@ -501,6 +634,9 @@ async def chat_stream(request: Request, chat_req: ChatRequest):
     create_or_update_session(session_id, device_id)
     
     async def robust_event_stream():
+        import asyncio
+        import concurrent.futures
+        
         # Configurable SSE connection timeout (seconds)
         connection_timeout = int(os.getenv('SSE_CONNECTION_TIMEOUT', 300))
         start_time = time.time()
@@ -519,15 +655,8 @@ async def chat_stream(request: Request, chat_req: ChatRequest):
             
             await asyncio.sleep(0.5)  # Brief pause for better UX
             
-            # 2. TOOL EXECUTION EVENTS - Progress Feedback
-            if is_search_request(chat_req.message):
-                yield sse_event('thinking', {'message': 'Searching product catalog...', 'session_id': session_id})
-                yield sse_event('tool_start', {'tool': 'search_products', 'status': 'executing', 'session_id': session_id})
-            elif is_cart_request(chat_req.message):
-                yield sse_event('thinking', {'message': 'Managing your shopping cart...', 'session_id': session_id})
-                yield sse_event('tool_start', {'tool': 'cart_operation', 'status': 'executing', 'session_id': session_id})
-            else:
-                yield sse_event('thinking', {'message': 'Processing your request...', 'session_id': session_id})
+            # 2. INTELLIGENT PROCESSING - Let agent decide tools naturally
+            yield sse_event('thinking', {'message': 'Understanding your request...', 'session_id': session_id})
             
             # 3. EXECUTE MCP TOOLS (Same logic as regular chat endpoint)
             logger.info(f"[CHAT-SSE] Processing message for session: {session_id}")
@@ -548,11 +677,77 @@ async def chat_stream(request: Request, chat_req: ChatRequest):
             # Indicate processing
             yield sse_event('thinking', {'message': 'Processing with available tools...', 'session_id': session_id})
             
-            # Execute normally - MCP tools work as before
-            contents = await session_llm.generate(
+            # Start progressive streaming with real-time tool execution
+            yield sse_event('conversation_chunk', {
+                'message': 'Let me help you with that...',
+                'session_id': session_id,
+                'stage': 'initial'
+            })
+            
+            # Execute with progressive monitoring - run LLM generation in background
+            # Create a future for the LLM generation
+            loop = asyncio.get_event_loop()
+            generation_task = loop.create_task(session_llm.generate(
                 message=enhanced_message,
                 request_params=request_params
-            )
+            ))
+            
+            # Monitor raw data queue for real-time tool events while generation runs
+            contents = None
+            tool_events_sent = []
+            
+            while not generation_task.done():
+                # Check for tool events in real-time
+                if session_id in raw_data_queues:
+                    queue = raw_data_queues[session_id]
+                    try:
+                        # Short timeout to keep checking generation status
+                        raw_event = await asyncio.wait_for(queue.get(), timeout=0.1)
+                        
+                        # Send tool events immediately as they happen
+                        if raw_event['event_type'] == 'tool_start':
+                            tool_name = raw_event['data'].get('tool_name', 'unknown')
+                            yield sse_event('tool_start', raw_event['data'])
+                            yield sse_event('conversation_chunk', {
+                                'message': f'Executing {tool_name}...',
+                                'session_id': session_id,
+                                'stage': 'tool_execution'
+                            })
+                            tool_events_sent.append(('start', tool_name))
+                            logger.info(f"[SSE-REALTIME] Sent tool_start for {tool_name}")
+                            
+                        elif raw_event['event_type'] == 'tool_complete':
+                            tool_name = raw_event['data'].get('tool_name', 'unknown')
+                            yield sse_event('tool_complete', raw_event['data'])
+                            tool_events_sent.append(('complete', tool_name))
+                            logger.info(f"[SSE-REALTIME] Sent tool_complete for {tool_name}")
+                            
+                        elif raw_event['event_type'] == 'raw_products':
+                            yield sse_event('raw_products', raw_event['data'])
+                            products_count = len(raw_event['data'].get('products', []))
+                            yield sse_event('conversation_chunk', {
+                                'message': f'Found {products_count} products...',
+                                'session_id': session_id,
+                                'stage': 'tool_results'
+                            })
+                            logger.info(f"[SSE-REALTIME] Sent {products_count} raw products")
+                            
+                        elif raw_event['event_type'] == 'raw_cart':
+                            yield sse_event('raw_cart', raw_event['data'])
+                            logger.info(f"[SSE-REALTIME] Sent raw cart data")
+                            
+                    except asyncio.TimeoutError:
+                        # No events in queue, continue monitoring
+                        pass
+                    except Exception as e:
+                        logger.error(f"[SSE-REALTIME] Error processing queue event: {e}")
+                else:
+                    # Short sleep if no queue exists yet
+                    await asyncio.sleep(0.1)
+            
+            # Get the final result
+            contents = await generation_task
+            logger.info(f"[SSE-REALTIME] LLM generation completed, tool events sent: {tool_events_sent}")
             
             # 4. STRUCTURED RESULT EVENTS - Frontend Integration
             response_text, structured_data, context_type, action_required = process_mcp_results(contents)
@@ -578,7 +773,6 @@ async def chat_stream(request: Request, chat_req: ChatRequest):
                         'biap_specifications': True,  # Signal that full ONDC specifications are available
                         # Enhanced search intelligence metadata
                         'search_intelligence': {
-                            'query_intent': search_metadata.get('query_intent', 'unknown'),
                             'relevance_threshold': search_metadata.get('relevance_threshold'),
                             'adaptive_results': search_metadata.get('adaptive_results', False),
                             'context_aware': search_metadata.get('context_aware', False),
@@ -608,40 +802,55 @@ async def chat_stream(request: Request, chat_req: ChatRequest):
                         'session_id': session_id
                     })
             
-            # 5. FINAL RESPONSE EVENT
+            # Process any remaining events in queue after generation completes
+            final_events_processed = 0
+            if session_id in raw_data_queues:
+                queue = raw_data_queues[session_id]
+                while not queue.empty():
+                    try:
+                        raw_event = await asyncio.wait_for(queue.get(), timeout=0.1)
+                        final_events_processed += 1
+                        
+                        # Handle any remaining tool events
+                        if raw_event['event_type'] == 'tool_start':
+                            yield sse_event('tool_start', raw_event['data'])
+                        elif raw_event['event_type'] == 'tool_complete':
+                            yield sse_event('tool_complete', raw_event['data'])
+                        elif raw_event['event_type'] == 'raw_products':
+                            yield sse_event('raw_products', raw_event['data'])
+                        elif raw_event['event_type'] == 'raw_cart':
+                            yield sse_event('raw_cart', raw_event['data'])
+                    except asyncio.TimeoutError:
+                        break
+                    except Exception as e:
+                        logger.error(f"[SSE-REALTIME] Error processing final events: {e}")
+                        break
+            
+            logger.info(f"[SSE-REALTIME] Processed {final_events_processed} final events")
+            
+            # Add conversational context based on tool execution
+            if tool_events_sent:
+                tool_names = [event[1] for event in tool_events_sent if event[0] == 'complete']
+                if 'search_products' in tool_names and 'add_to_cart' in tool_names:
+                    yield sse_event('conversation_chunk', {
+                        'message': 'Perfect! I found great options and added the best one to your cart.',
+                        'session_id': session_id,
+                        'stage': 'completion'
+                    })
+                elif 'search_products' in tool_names:
+                    yield sse_event('conversation_chunk', {
+                        'message': 'Great! I found some excellent options for you.',
+                        'session_id': session_id,
+                        'stage': 'completion'
+                    })
+            
+            # 5. FINAL RESPONSE EVENT (now comes AFTER tool events)
             yield sse_event('response', {
                 'content': response_text,
                 'session_id': session_id,
                 'timestamp': datetime.now().isoformat(),
                 'complete': True
             })
-            
-            # 5.5. CHECK FOR QUEUED RAW DATA from MCP callbacks
-            # Configurable wait time for any pending MCP callbacks to arrive
-            raw_data_wait = float(os.getenv('SSE_RAW_DATA_WAIT', 1.0))
-            await asyncio.sleep(raw_data_wait)
-            
-            # Send any queued raw data to frontend
-            if session_id in raw_data_queues:
-                queue = raw_data_queues[session_id]
-                while not queue.empty():
-                    try:
-                        # Configurable queue processing timeout (seconds)
-                        queue_timeout = float(os.getenv('SSE_QUEUE_TIMEOUT', 0.5))
-                        raw_event = await asyncio.wait_for(queue.get(), timeout=queue_timeout)
-                        if raw_event['event_type'] == 'raw_products':
-                            yield sse_event('raw_products', raw_event['data'])
-                            logger.info(f"[SSE-RAW] Sent {len(raw_event['data'].get('products', []))} raw products to frontend for session {session_id}")
-                        elif raw_event['event_type'] == 'raw_cart':
-                            yield sse_event('raw_cart', raw_event['data'])
-                            cart_data = raw_event['data'].get('cart_items', [])
-                            cart_count = len(cart_data) if isinstance(cart_data, list) else "dict"
-                            logger.info(f"[SSE-RAW] Sent raw cart data ({cart_count} items) to frontend for session {session_id}")
-                    except asyncio.TimeoutError:
-                        break
-                    except Exception as e:
-                        logger.error(f"[SSE-RAW] Error sending queued raw data: {e}")
-                        break
             
             # 6. COMPLETION SIGNAL
             yield "data: [DONE]\n\n"
