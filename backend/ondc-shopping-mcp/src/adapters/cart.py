@@ -10,6 +10,7 @@ Provides comprehensive cart management with:
 
 from typing import Dict, Any, Optional
 import json
+from datetime import datetime
 from .utils import (
     get_persistent_session, 
     save_persistent_session, 
@@ -86,9 +87,12 @@ async def add_to_cart(session_id: Optional[str] = None, item: Optional[Dict] = N
             success, message = await cart_service.add_item(session_obj, item, quantity)
             logger.info(f"[Cart] Add item result - Success: {success}, Message: {message}")
             
+            # CRITICAL: Check and log authentication status for debugging
+            logger.info(f"[Cart] Authentication check - success: {success}, user_authenticated: {session_obj.user_authenticated}, user_id: {session_obj.user_id}")
+            
             # If local add succeeded and user is authenticated, sync with backend
             if success and session_obj.user_authenticated and session_obj.user_id:
-                logger.info(f"[Cart] User authenticated, adding to backend cart")
+                logger.info(f"[Cart] ✅ User authenticated, adding to backend cart")
                 backend_success, backend_msg = await cart_service.add_item_to_backend(session_obj, item, quantity)
                 logger.info(f"[Cart] Backend add result - Success: {backend_success}, Message: {backend_msg}")
                 
@@ -96,6 +100,8 @@ async def add_to_cart(session_id: Optional[str] = None, item: Optional[Dict] = N
                 if not backend_success:
                     # Backend failed, but local succeeded - warn user
                     message = f" {message}\n(Note: Backend sync failed - {backend_msg})"
+            else:
+                logger.warning(f"[Cart] ❌ Skipping backend sync - Auth check failed")
             
         except Exception as e:
             logger.error(f"[Cart] Exception in cart_service.add_item: {e}")
@@ -105,61 +111,86 @@ async def add_to_cart(session_id: Optional[str] = None, item: Optional[Dict] = N
                 session_obj.session_id
             )
         
-        # Get cart summary
-        cart_summary = cart_service.get_cart_summary(session_obj)
-        
-        # Get raw backend cart data for SSE streaming (after successful add)
-        raw_backend_data = None
-        logger.debug(f"[Cart Debug] Starting backend data capture. Success: {success}")
-        if success:
+        # DRY: Use the same cart view service for consistent parsing after add operation
+        if success and session_obj.user_authenticated and session_obj.user_id:
             try:
-                user_id = session_obj.user_id or "guestUser"
-                device_id = getattr(session_obj, 'device_id', 'device_9bca8c59')
-                logger.debug(f"[Cart Debug] About to call get_cart with user_id: {user_id}, device_id: {device_id}")
+                logger.info(f"[Cart] 🔄 Using DRY service to get fresh cart state after add operation")
                 
-                # First try backend cart for authenticated users
-                if session_obj.user_authenticated and session_obj.user_id:
-                    logger.debug(f"[Cart Debug] User authenticated, fetching from backend")
-                    backend_result = await cart_service.buyer_app.get_cart(user_id, device_id)
-                    logger.debug(f"[Cart Debug] Backend call completed. Result type: {type(backend_result)}, Result: {backend_result}")
-                    if backend_result:
-                        raw_backend_data = backend_result
-                        logger.info(f"[Cart] Raw backend data captured from backend: {len(raw_backend_data) if isinstance(raw_backend_data, list) else 'dict'}")
-                    else:
-                        logger.warning(f"[Cart Debug] Backend result is empty for authenticated user: {backend_result}")
+                # DRY: Reuse the same cart parsing logic
+                cart_result = await cart_service.get_formatted_cart_view(session_obj)
+                cart_summary = cart_result['cart_summary']
                 
-                # For guest users or if backend is empty, use local cart data
-                if not raw_backend_data and session_obj.cart and session_obj.cart.items:
-                    logger.debug(f"[Cart Debug] Using local cart data for SSE transmission")
-                    # Convert local cart items to dictionary format for SSE
-                    raw_backend_data = []
-                    for item in session_obj.cart.items:
-                        if hasattr(item, 'to_dict'):
-                            cart_item_dict = item.to_dict()
-                            # Add BIAP-compatible structure
-                            cart_item_dict['biap_format'] = True
-                            cart_item_dict['source'] = 'local_session'
-                            raw_backend_data.append(cart_item_dict)
-                    logger.info(f"[Cart] Raw cart data captured from local session: {len(raw_backend_data)} items")
+                # Store backend response in session for continuity
+                if cart_result['raw_backend_data']:
+                    if not hasattr(session_obj, 'backend_responses'):
+                        session_obj.backend_responses = {}
+                    
+                    session_obj.backend_responses['latest_cart_state'] = cart_result['raw_backend_data']
+                    session_obj.backend_responses['last_cart_operation'] = {
+                        'operation': 'add_to_cart',
+                        'timestamp': datetime.utcnow().isoformat(),
+                        'raw_response': cart_result['raw_backend_data']
+                    }
+                
+                # Update message with REAL backend data instead of assumption
+                item_name = item.get('name', 'item')
+                total_items = cart_summary.get('total_items', 0)
+                total_value = cart_summary.get('total_value', 0)
+                message = f"✅ Added {quantity}x {item_name} to cart\nCart total: {total_items} items - ₹{total_value:.2f}"
                 
             except Exception as e:
-                logger.error(f"[Cart] Failed to capture raw backend data after add: {e}", exc_info=True)
+                logger.error(f"[Cart] ❌ Failed to get fresh cart via DRY service: {e}")
+                # Fallback to local cart summary only if backend fails
+                cart_summary = cart_service.get_cart_summary(session_obj)
+                cart_result = {'raw_backend_data': None, 'source': 'local_fallback'}
+        else:
+            # Fallback for unauthenticated users
+            logger.info(f"[Cart] Using local cart summary (unauthenticated user)")
+            cart_summary = cart_service.get_cart_summary(session_obj)
+            cart_result = {'raw_backend_data': None, 'source': 'local_session'}
+        
+        # Use fresh backend data for SSE streaming (from DRY service)
+        raw_backend_data = cart_result.get('raw_backend_data') if 'cart_result' in locals() else None
+        
+        if raw_backend_data:
+            logger.info(f"[Cart] 📡 Using fresh backend data for SSE: {len(raw_backend_data)} items")
+        else:
+            logger.info(f"[Cart] 📡 No backend data available for SSE, using local fallback")
+            # Fallback to local cart data only if no backend data available
+            if session_obj.cart and session_obj.cart.items:
+                raw_backend_data = []
+                for item in session_obj.cart.items:
+                    if hasattr(item, 'to_dict'):
+                        cart_item_dict = item.to_dict()
+                        cart_item_dict['biap_format'] = True
+                        cart_item_dict['source'] = 'local_session'
+                        raw_backend_data.append(cart_item_dict)
         
         # Save session with enhanced persistence
         save_persistent_session(session_obj, conversation_manager)
         
-        # Send raw cart data to frontend via SSE (Universal Pattern)
+        # Send fresh backend data to frontend via SSE (Universal Pattern)
         if raw_backend_data:
             raw_data_for_sse = {
                 'cart_items': raw_backend_data,
                 'cart_summary': cart_summary,
-                'biap_specifications': True
+                'biap_specifications': True,
+                'data_source': 'fresh_backend',  # Indicate this is fresh backend data
+                'operation': 'add_to_cart',
+                'timestamp': datetime.utcnow().isoformat()
             }
             send_raw_data_to_frontend(session_obj.session_id, 'add_to_cart', raw_data_for_sse)
+            logger.info(f"[Cart] 📡 Fresh backend data sent to frontend via SSE")
+        
+        # Enhance message to encourage agent to refresh cart view
+        if success:
+            enhanced_message = f"{message}\n\n💡 Call view_cart to see the updated cart contents."
+        else:
+            enhanced_message = message
         
         return format_mcp_response(
             success,
-            message,
+            enhanced_message,
             session_obj.session_id,
             cart_summary=cart_summary
         )
@@ -174,52 +205,51 @@ async def add_to_cart(session_id: Optional[str] = None, item: Optional[Dict] = N
 
 
 async def view_cart(session_id: Optional[str] = None, **kwargs) -> Dict[str, Any]:
-    """MCP adapter for view_cart"""
+    """MCP adapter for view_cart - DRY architecture using reusable service"""
     try:
         # Get enhanced session with conversation tracking
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="view_cart", **kwargs)
         logger.info(f"[Cart] View cart - Session ID: {session_obj.session_id}")
         
-        # SYNC: Fetch from backend and sync to local session.cart
-        logger.info(f"[Cart] Syncing backend cart to local session for display")
-        sync_success = await cart_service.sync_backend_to_local_cart(session_obj)
+        # DRY: Use reusable cart view service with fixed parsing logic
+        # Note: cart_service is already imported at module level
+        cart_result = await cart_service.get_formatted_cart_view(session_obj)
         
-        if not sync_success:
-            logger.warning(f"[Cart] Backend sync failed, proceeding with local cart display")
-        
-        # Get cart display using the original working service method
-        cart_display = cart_service.format_cart_display(session_obj)
-        cart_summary = cart_service.get_cart_summary(session_obj)
-        
-        # Get raw backend cart data for SSE streaming
-        raw_backend_data = None
-        try:
-            user_id = session_obj.user_id or "guestUser"
-            device_id = getattr(session_obj, 'device_id', 'device_9bca8c59')
-            backend_result = await cart_service.buyer_app.get_cart(user_id, device_id)
-            if backend_result:
-                raw_backend_data = backend_result
-                logger.info(f"[Cart] Raw backend data captured for SSE: {len(raw_backend_data) if isinstance(raw_backend_data, list) else 'dict'}")
-        except Exception as e:
-            logger.warning(f"[Cart] Failed to capture raw backend data: {e}")
+        # Store backend response in session for continuity
+        if cart_result['raw_backend_data']:
+            if not hasattr(session_obj, 'backend_responses'):
+                session_obj.backend_responses = {}
+            
+            session_obj.backend_responses['latest_cart_state'] = cart_result['raw_backend_data']
+            session_obj.backend_responses['last_cart_operation'] = {
+                'operation': 'view_cart',
+                'timestamp': datetime.utcnow().isoformat(),
+                'raw_response': cart_result['raw_backend_data']
+            }
         
         # Save session with enhanced persistence
         save_persistent_session(session_obj, conversation_manager)
         
-        # Send raw cart data to frontend via SSE (Universal Pattern)
-        if raw_backend_data:
+        # Send fresh backend data to frontend via SSE (Universal Pattern)
+        if cart_result['raw_backend_data']:
             raw_data_for_sse = {
-                'cart_items': raw_backend_data,
-                'cart_summary': cart_summary,
-                'biap_specifications': True
+                'cart_items': cart_result['raw_backend_data'],
+                'cart_summary': cart_result['cart_summary'],
+                'biap_specifications': True,
+                'data_source': cart_result['source'],
+                'operation': 'view_cart',
+                'timestamp': datetime.utcnow().isoformat()
             }
             send_raw_data_to_frontend(session_obj.session_id, 'view_cart', raw_data_for_sse)
+            logger.info(f"[Cart] 📡 Cart data sent to frontend via SSE (source: {cart_result['source']})")
+        else:
+            logger.info(f"[Cart] 📡 No backend data for SSE (source: {cart_result['source']})")
         
         return format_mcp_response(
             True,
-            cart_display,
+            cart_result['cart_display'],
             session_obj.session_id,
-            cart=cart_summary
+            cart=cart_result['cart_summary']
         )
         
     except Exception as e:
@@ -249,9 +279,15 @@ async def remove_from_cart(session_id: Optional[str], item_id: str, **kwargs) ->
         # Save session with enhanced persistence
         save_persistent_session(session_obj, conversation_manager)
         
+        # Enhance message to encourage agent to refresh cart view
+        if success:
+            enhanced_message = f"{message}\n\n💡 Call view_cart to see the updated cart."
+        else:
+            enhanced_message = message
+        
         return format_mcp_response(
             success,
-            message,
+            enhanced_message,
             session_obj.session_id,
             cart_summary=cart_summary
         )
@@ -284,9 +320,15 @@ async def update_cart_quantity(session_id: Optional[str], item_id: str,
         # Save session with enhanced persistence
         save_persistent_session(session_obj, conversation_manager)
         
+        # Enhance message to encourage agent to refresh cart view  
+        if success:
+            enhanced_message = f"{message}\n\n💡 Call view_cart to see the updated cart."
+        else:
+            enhanced_message = message
+        
         return format_mcp_response(
             success,
-            message,
+            enhanced_message,
             session_obj.session_id,
             cart_summary=cart_summary
         )

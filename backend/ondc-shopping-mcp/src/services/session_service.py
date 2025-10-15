@@ -202,6 +202,45 @@ class SessionService:
         
         return cleaned
     
+    def organize_old_sessions(self) -> int:
+        """
+        Move old sessions (>1 day) to organized directories by date
+        
+        Returns:
+            Number of sessions organized
+        """
+        organized = 0
+        current_time = datetime.utcnow()
+        one_day_ago = current_time - timedelta(days=1)
+        
+        # Create archive directory
+        archive_path = self.storage_path / "archive"
+        archive_path.mkdir(exist_ok=True)
+        
+        for session_file in self.storage_path.glob("*.json"):
+            try:
+                with open(session_file, 'r') as f:
+                    data = json.load(f)
+                
+                last_accessed = datetime.fromisoformat(data.get('last_accessed', ''))
+                if last_accessed < one_day_ago:
+                    # Create date-based directory
+                    date_dir = archive_path / last_accessed.strftime("%Y-%m-%d")
+                    date_dir.mkdir(exist_ok=True)
+                    
+                    # Move session file
+                    new_path = date_dir / session_file.name
+                    session_file.rename(new_path)
+                    organized += 1
+                    
+            except Exception as e:
+                logger.warning(f"Failed to organize session file {session_file}: {e}")
+        
+        if organized > 0:
+            logger.info(f"Organized {organized} old sessions into archive directories")
+        
+        return organized
+    
     def _is_valid(self, session: Session) -> bool:
         """
         Check if session is still valid

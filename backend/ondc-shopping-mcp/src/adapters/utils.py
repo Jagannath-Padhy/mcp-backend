@@ -48,6 +48,33 @@ def get_persistent_session(session_id: Optional[str] = None, tool_name: str = "u
         session_obj = session_service.create()
         logger.warning(f"[Session] No session_id provided to {tool_name}, created new: {session_obj.session_id}")
     
+    # CRITICAL FIX: Apply userId/deviceId from kwargs to session if not set
+    # This ensures all MCP tools can access backend APIs, not just initialize_shopping
+    provided_user_id = kwargs.get('userId') or kwargs.get('user_id')
+    provided_device_id = kwargs.get('deviceId') or kwargs.get('device_id')
+    
+    # Handle user_id
+    if provided_user_id:
+        if not session_obj.user_id or session_obj.user_id != provided_user_id:
+            session_obj.user_id = provided_user_id
+            logger.debug(f"[Session] Applied userId from kwargs: {provided_user_id}")
+    
+    # Handle device_id - only update if explicitly provided (not null/empty)
+    if provided_device_id:
+        if not session_obj.device_id or session_obj.device_id != provided_device_id:
+            session_obj.device_id = provided_device_id
+            logger.debug(f"[Session] Applied deviceId from kwargs: {provided_device_id}")
+    else:
+        # If deviceId is null/empty in kwargs, preserve existing session device_id
+        # This prevents generating new device IDs when the session already has one
+        if session_obj.device_id:
+            logger.debug(f"[Session] Preserving existing deviceId: {session_obj.device_id}")
+    
+    # CRITICAL: Mark session as authenticated for backend operations if we have both user_id and device_id
+    if session_obj.user_id and session_obj.device_id and not session_obj.user_authenticated:
+        session_obj.user_authenticated = True
+        logger.info(f"[Session] {tool_name} - Enabled backend authentication for userId: {session_obj.user_id}, deviceId: {session_obj.device_id}")
+    
     return session_obj, None
 
 

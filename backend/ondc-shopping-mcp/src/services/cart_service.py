@@ -53,8 +53,8 @@ class CartService:
             if not session.user_authenticated or not session.auth_token or not session.user_id:
                 return False, " Please login to add items to cart"
             
-            # Get device ID
-            device_id = await get_or_create_device_id()
+            # Use session device ID for consistency  
+            device_id = session.device_id
             
             # Prepare cart payload matching frontend structure
             cart_payload = self._create_backend_cart_payload(product, quantity)
@@ -748,7 +748,7 @@ class CartService:
         payload = {
             "local_id": backend_payload.get("local_id"),
             "id": backend_payload.get("id"),
-            "quantity": backend_payload.get("quantity", {"count": quantity}),
+            "quantity": {"count": quantity},  # FIXED: Always use the provided quantity parameter
             "provider": backend_payload.get("provider"),
             "customisations": backend_payload.get("customisations", []),
             "hasCustomisations": backend_payload.get("hasCustomisations", False),
@@ -772,8 +772,8 @@ class CartService:
             if not session.user_authenticated or not session.user_id:
                 return False, " Please login to view cart", []
             
-            # Get device ID
-            device_id = await get_or_create_device_id()
+            # Use session device ID for consistency  
+            device_id = session.device_id
             
             logger.info(f"[Cart] Fetching backend cart - User: {session.user_id}, Device: {device_id}")
             
@@ -872,19 +872,15 @@ class CartService:
                 logger.error(f"[Cart] Expected dict, got {type(backend_item)}: {backend_item}")
                 return None
             
-            # Extract from backend structure - from logs we know the format
+            # Extract from backend structure - backend response shows item contains descriptor/price directly
             item_data = backend_item.get('item', {})
             if not isinstance(item_data, dict):
                 logger.error(f"[Cart] item_data is not dict: {type(item_data)}")
                 return None
                 
-            product_data = item_data.get('product', {})
-            if not isinstance(product_data, dict):
-                logger.error(f"[Cart] product_data is not dict: {type(product_data)}")
-                return None
-                
-            descriptor = product_data.get('descriptor', {})
-            price_data = product_data.get('price', {})
+            # FIXED: descriptor and price are directly in item_data, not nested in 'product'
+            descriptor = item_data.get('descriptor', {})
+            price_data = item_data.get('price', {})
             
             # Extract essential fields with safe access
             item_id = backend_item.get('id', backend_item.get('item_id', ''))
@@ -892,8 +888,9 @@ class CartService:
             price = float(price_data.get('value', 0)) if isinstance(price_data, dict) else 0.0
             quantity = int(backend_item.get('count', 1))
             
-            # Extract provider information safely
+            # Extract provider information safely - provider_id is at backend_item level
             provider_id = backend_item.get('provider_id', '')
+            # Provider details are in item_data for structured provider info
             provider_data = item_data.get('provider', {})
             if not isinstance(provider_data, dict):
                 provider_data = {}
@@ -943,6 +940,104 @@ class CartService:
         except Exception as e:
             logger.error(f"[Cart] Error converting backend item to CartItem: {e}")
             return None
+    
+    async def get_formatted_cart_view(self, session: Session) -> Dict[str, Any]:
+        """
+        DRY method: Get formatted cart view with proper backend data parsing
+        Used by both view_cart and add_to_cart tools
+        
+        Args:
+            session: User session
+            
+        Returns:
+            Dictionary with cart_display, cart_summary, and raw_backend_data
+        """
+        try:
+            if not session.user_authenticated or not session.user_id:
+                logger.info(f"[Cart] Using local cart for unauthenticated session")
+                return {
+                    'cart_display': self.format_cart_display(session),
+                    'cart_summary': self.get_cart_summary(session),
+                    'raw_backend_data': None,
+                    'source': 'local_session'
+                }
+            
+            # Get fresh backend data with credential logging
+            user_id = session.user_id
+            device_id = session.device_id
+            logger.info(f"[Cart] 🔄 DRY SERVICE: Fetching cart for user={user_id}, device={device_id}")
+            
+            raw_backend_data = await self.buyer_app.get_cart(user_id, device_id)
+            logger.info(f"[Cart] ✅ DRY SERVICE: Backend returned {len(raw_backend_data) if isinstance(raw_backend_data, list) else 'invalid'} items")
+            
+            if not raw_backend_data or not isinstance(raw_backend_data, list):
+                logger.info(f"[Cart] DRY SERVICE: Empty backend response")
+                return {
+                    'cart_display': "🛒 **Your cart is empty**\n\nStart shopping by searching for products!",
+                    'cart_summary': {'total_items': 0, 'total_value': 0.0, 'is_empty': True, 'items_count': 0},
+                    'raw_backend_data': [],
+                    'source': 'backend_empty'
+                }
+            
+            # Parse backend data with CORRECT structure paths
+            total_items = sum(item.get('count', 0) for item in raw_backend_data)
+            total_value = sum(
+                item.get('count', 0) * 
+                float(item.get('item', {}).get('product', {}).get('price', {}).get('value', 0))
+                for item in raw_backend_data
+            )
+            
+            cart_summary = {
+                'total_items': total_items,
+                'total_value': total_value,
+                'is_empty': total_items == 0,
+                'items_count': len(raw_backend_data)
+            }
+            
+            logger.info(f"[Cart] DRY SERVICE: Parsed {total_items} items, ₹{total_value:.2f} total")
+            
+            if total_items == 0:
+                cart_display = "🛒 **Your cart is empty**\n\nStart shopping by searching for products!"
+            else:
+                cart_display = f"🛒 **Your Cart ({total_items} items)**\n\n"
+                
+                for i, item in enumerate(raw_backend_data, 1):
+                    # FIXED: Use correct backend structure paths
+                    item_details = item.get('item', {})
+                    product_details = item_details.get('product', {})
+                    descriptor = product_details.get('descriptor', {})
+                    price_info = product_details.get('price', {})
+                    provider_info = item_details.get('provider', {}).get('descriptor', {})
+                    quantity = item.get('count', 0)
+                    
+                    name = descriptor.get('name', 'Unknown Item')
+                    unit_price = float(price_info.get('value', 0))
+                    subtotal = quantity * unit_price
+                    provider = provider_info.get('name', 'Unknown Store')
+                    category = product_details.get('category_id', 'Unknown Category')
+                    
+                    cart_display += f"{i}. **{name}** (from {provider})\n"
+                    cart_display += f"   ₹{unit_price:.2f} x {quantity} = ₹{subtotal:.2f}\n"
+                    cart_display += f"   Category: {category}\n\n"
+                
+                cart_display += f"**Total: ₹{total_value:.2f}**"
+            
+            return {
+                'cart_display': cart_display,
+                'cart_summary': cart_summary,
+                'raw_backend_data': raw_backend_data,
+                'source': 'backend_fresh'
+            }
+            
+        except Exception as e:
+            logger.error(f"[Cart] ❌ DRY SERVICE: Failed to get cart view: {e}")
+            # Fallback to local session data
+            return {
+                'cart_display': f"❌ **Cart view failed**: {str(e)}\n\nUsing local session data:\n" + self.format_cart_display(session),
+                'cart_summary': self.get_cart_summary(session),
+                'raw_backend_data': None,
+                'source': 'local_fallback'
+            }
 
 
 # Singleton instance

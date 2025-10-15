@@ -126,13 +126,46 @@ async def select_items_for_order(
         # Get enhanced session with conversation tracking
         session_obj, conversation_manager = get_persistent_session(session_id, tool_name="select_items_for_order", **kwargs)
         
-        # Validate cart exists
+        # Validate cart exists - with auto-sync for authenticated users
         if session_obj.cart.is_empty():
-            return format_mcp_response(
-                False,
-                ' Cart is empty. Please add items first.',
-                session_obj.session_id
-            )
+            # AUTO-SYNC: If user is authenticated, try to sync backend cart to local session
+            if session_obj.user_authenticated and session_obj.user_id and session_obj.device_id:
+                logger.info(f"[SMART CHECKOUT DEBUG] Local cart empty, attempting backend sync for user: {session_obj.user_id}, device: {session_obj.device_id}")
+                
+                try:
+                    # Import cart service for sync operation
+                    from ..services.cart_service import get_cart_service
+                    cart_service = get_cart_service()
+                    
+                    # Sync backend cart to local session
+                    sync_success = await cart_service.sync_backend_to_local_cart(session_obj)
+                    logger.info(f"[SMART CHECKOUT DEBUG] Backend sync result: {sync_success}")
+                    
+                    if sync_success and not session_obj.cart.is_empty():
+                        logger.info(f"[SMART CHECKOUT DEBUG] Backend sync successful - found {len(session_obj.cart.items)} items in backend cart")
+                        # Continue with checkout flow
+                    else:
+                        logger.info(f"[SMART CHECKOUT DEBUG] Backend sync failed or still empty - returning empty cart message")
+                        return format_mcp_response(
+                            False,
+                            ' Cart is empty. Please add items first.',
+                            session_obj.session_id
+                        )
+                except Exception as e:
+                    logger.error(f"[SMART CHECKOUT DEBUG] Backend sync failed: {e}")
+                    return format_mcp_response(
+                        False,
+                        ' Cart is empty. Please add items first.',
+                        session_obj.session_id
+                    )
+            else:
+                # Not authenticated or missing credentials - return empty cart message
+                logger.info(f"[SMART CHECKOUT DEBUG] Not authenticated or missing credentials - cannot sync backend cart")
+                return format_mcp_response(
+                    False,
+                    ' Cart is empty. Please add items first.',
+                    session_obj.session_id
+                )
         
         # Check if delivery location is available in session or parameters
         session_location = getattr(session_obj, 'delivery_location', None)
@@ -477,7 +510,7 @@ async def confirm_order(
         
         # Validate payment status for non-COD orders
         payment_method = session_obj.checkout_state.payment_method or 'cod'
-        if payment_method.lower() != 'cod' and payment_status.upper() not in ['PAID', 'CAPTURED', 'SUCCESS']:
+        if payment_method.lower() != 'cod' and payment_status and payment_status.upper() not in ['PAID', 'CAPTURED', 'SUCCESS']:
             return format_mcp_response(
                 False,
                 f" Payment verification required. Current status: {payment_status}\\n" +

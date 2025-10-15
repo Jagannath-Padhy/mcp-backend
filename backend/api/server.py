@@ -70,10 +70,10 @@ TOOL_EVENT_MAPPING = {
 }
 
 def create_sse_event(tool_name, raw_data, session_id):
-    """Create universal SSE event based on tool type"""
+    """Create universal SSE event based on tool type using DRY pattern"""
     event_type = TOOL_EVENT_MAPPING.get(tool_name, 'raw_data')  # Generic fallback
     
-    # Create base event structure
+    # Base event structure
     event_data = {
         'tool_name': tool_name,
         'session_id': session_id,
@@ -82,32 +82,41 @@ def create_sse_event(tool_name, raw_data, session_id):
         'timestamp': datetime.now().isoformat()
     }
     
-    # Add tool-specific data
-    if tool_name == 'search_products':
-        event_data.update({
+    # Tool-specific data mappings
+    cart_tools = ['add_to_cart', 'view_cart', 'update_cart_quantity', 'remove_from_cart', 'clear_cart', 'get_cart_total']
+    payment_tools = ['create_payment', 'verify_payment', 'get_payment_status']
+    
+    tool_data_mappings = {
+        'search_products': {
             'products': raw_data.get('products', []),
             'total_results': raw_data.get('total_results', 0),
             'search_type': raw_data.get('search_type', 'hybrid'),
             'page': raw_data.get('page', 1),
             'page_size': raw_data.get('page_size', 10)
-        })
-    elif tool_name in ['add_to_cart', 'view_cart', 'update_cart_quantity', 'remove_from_cart', 'clear_cart', 'get_cart_total']:
-        event_data.update({
+        },
+        'cart_tools': {
             'cart_items': raw_data.get('cart_items', []),
             'cart_summary': raw_data.get('cart_summary', {})
-        })
-    elif tool_name in ['create_payment', 'verify_payment', 'get_payment_status']:
-        event_data.update({
+        },
+        'payment_tools': {
             'payment_status': raw_data.get('payment_status', 'unknown'),
             'payment_id': raw_data.get('payment_id'),
             'payment_verification': raw_data.get('payment_verification'),
             'razorpay_order_id': raw_data.get('razorpay_order_id'),
             'next_step': raw_data.get('next_step'),
             'user_action_required': raw_data.get('user_action_required')
-        })
+        }
+    }
+    
+    # Apply appropriate data mapping
+    if tool_name == 'search_products':
+        event_data.update(tool_data_mappings['search_products'])
+    elif tool_name in cart_tools:
+        event_data.update(tool_data_mappings['cart_tools'])
+    elif tool_name in payment_tools:
+        event_data.update(tool_data_mappings['payment_tools'])
     else:
-        # Generic data structure for future tools
-        event_data.update(raw_data)
+        event_data.update(raw_data)  # Generic fallback
     
     return {
         'event_type': event_type,
@@ -115,19 +124,30 @@ def create_sse_event(tool_name, raw_data, session_id):
     }
 
 def get_log_message(tool_name, raw_data):
-    """Generate appropriate log message based on tool type"""
+    """Generate appropriate log message based on tool type using DRY pattern"""
+    base_msg = "[RAW-DATA] Queued"
+    
+    # Tool-specific data extraction
+    tool_messages = {
+        'search_products': f"{len(raw_data.get('products', []))} products",
+        'cart_tools': f"cart data ({len(raw_data.get('cart_items', [])) if isinstance(raw_data.get('cart_items'), list) else 'dict'} items)",
+        'payment_tools': f"payment data (status: {raw_data.get('payment_status', 'unknown')}, id: {raw_data.get('payment_id', 'none')})"
+    }
+    
+    # Categorize tools
+    cart_tools = ['add_to_cart', 'view_cart', 'update_cart_quantity', 'remove_from_cart', 'clear_cart', 'get_cart_total']
+    payment_tools = ['create_payment', 'verify_payment', 'get_payment_status']
+    
     if tool_name == 'search_products':
-        return f"[RAW-DATA] Queued {len(raw_data.get('products', []))} products for SSE stream"
-    elif tool_name in ['add_to_cart', 'view_cart', 'update_cart_quantity', 'remove_from_cart', 'clear_cart', 'get_cart_total']:
-        cart_data = raw_data.get('cart_items', [])
-        cart_count = len(cart_data) if isinstance(cart_data, list) else "dict"
-        return f"[RAW-DATA] Queued cart data ({cart_count} items) for SSE stream"
-    elif tool_name in ['create_payment', 'verify_payment', 'get_payment_status']:
-        payment_status = raw_data.get('payment_status', 'unknown')
-        payment_id = raw_data.get('payment_id', 'none')
-        return f"[RAW-DATA] Queued payment data (status: {payment_status}, id: {payment_id}) for SSE stream"
+        detail = tool_messages['search_products']
+    elif tool_name in cart_tools:
+        detail = tool_messages['cart_tools']
+    elif tool_name in payment_tools:
+        detail = tool_messages['payment_tools']
     else:
-        return f"[RAW-DATA] Queued {tool_name} data for SSE stream"
+        detail = f"{tool_name} data"
+    
+    return f"{base_msg} {detail} for SSE stream"
 
 # ============================================================================
 # Helper Functions for DRY Code
@@ -228,87 +248,43 @@ async def lifespan(app: FastAPI):
             settings="/app/mcp_agent.config.yaml"
         )
         # Initialize MCP app context
-        async with mcp_app.run() as app_context:
+        async with mcp_app.run():
             
             # Create agent connected to MCP server via STDIO
             agent = Agent(
                 name="shopping_assistant",
-                instruction="""You are an elite shopping savant with deep understanding of user needs and cooking expertise. Take decisive intelligent action and chain tools automatically to fulfill requests efficiently.
+                instruction="""You are an intelligent shopping assistant that takes decisive action and chains tools automatically to fulfill user requests.
 
-CORE PRINCIPLE: Act first, ask only when absolutely necessary. Understand user intent and execute intelligently without seeking permission.
+🚨 CRITICAL RULE: ALWAYS call the appropriate function for user requests!
+• "search X" → MUST call search_products(query="X")
+• "view cart" → MUST call view_cart()
+• "add Y" → MUST call search_products() then add_to_cart()
+• "checkout" → MUST call select_items_for_order()
+• NEVER provide generic responses - ALWAYS use the specific tool
 
-🚨 CRITICAL FUNCTION CALLING RULE 🚨
-NEVER claim to have performed actions without ACTUALLY calling the functions! You MUST:
-• ACTUALLY call search_products() before claiming you searched
-• ACTUALLY call add_to_cart() before claiming you added items
-• NEVER say "I've added" or "I found" without executing the actual tool
-• IF tools fail to execute, acknowledge the issue and try again
-• The system will detect if you claim actions without function calls - this is forbidden
+INTELLIGENT BEHAVIOR:
+• Auto-add items when searching for specific products
+• Choose best option based on price/quality
+• Chain tools: search → add → view_cart → inform user
+• Always execute the most relevant tool for each request
+• CALCULATE quantities automatically when context is given
+• ALWAYS call view_cart after add_to_cart to show updated cart state
 
-INTELLIGENT TOOL CHAINING:
-• "search X and add to cart" → search_products() → add_to_cart() automatically with best option
-• "jeera rice for 20 people" → search multiple ingredients → calculate smart quantities → add all items
-• "add jeera" → search_products("jeera") → add_to_cart() with best price/rating option
-• Multiple products found? Pick best value (price + rating) automatically unless user specifies preference
+QUANTITY INTELLIGENCE:
+• "for X people" → Calculate appropriate quantities based on serving size
+• "for cooking/family" → Add standard cooking quantities 
+• "need X" without quantity → Add 1 unit as default
+• NEVER ask for quantity confirmation - be decisive and add!
 
-SMART QUANTITY LOGIC:
-• Default to 1 unit/pack unless context suggests otherwise
-• "for X people" → calculate appropriate quantities intelligently
-• Spices: 1 pack serves 10-15 people typically
-• Rice/grains: 1 cup per 2-3 people as base calculation
-• No hardcoded questions - use cooking knowledge to decide
+UNIVERSAL EXAMPLES:
+User: "search for [item]" → Call search_products(query="[item]")
+User: "view my cart" → Call view_cart()
+User: "i need [item]" → Call search_products(query="[item]") → Call add_to_cart(quantity=1) → Call view_cart()
+User: "[item] for X people" → Call search_products(query="[item]") → Call add_to_cart(quantity=[calculated]) → Call view_cart()
+User: "[item] for family" → Call search_products(query="[item]") → Call add_to_cart(quantity=[reasonable]) → Call view_cart()
+User: "checkout" → Call select_items_for_order()
 
-RECIPE INTELLIGENCE:
-• "jeera rice" → automatically search AND add jeera + rice with smart quantities 
-• "pasta dinner" → search AND add pasta + sauce + cheese
-• Anticipate complementary ingredients without asking permission
-• Suggest additional items after adding the primary request only if they exist in catalog
-• Incase of no additional items, suggest other products that are related to the primary request
-• If an ingredient/component is missing then only add what's available
-
-CHECKOUT MASTERY:
-• "checkout" or "proceed to checkout" → immediate tool chain:
-  1. select_items_for_order() (smart automation fetches addresses)
-  2. initialize_order() (smart automation uses address data)  
-  3. Ask for payment confirmation only
-• No saved addresses? Request delivery details once, then proceed automatically
-• Complete entire checkout flow with minimal user friction
-
-DECISION MAKING:
-• Multiple options? Choose best price/rating balance automatically
-• Uncertain quantities? Use reasonable defaults and mention what was added
-• ALWAYS auto-add for clear requests: "i need haldi" → search + add_to_cart automatically
-• NEVER ask "would you like to add" - just add the best option and report what you did
-• Only ask questions when truly ambiguous (e.g., "apples" for cooking vs eating)
-• Context like "haldi ceremony" makes intent crystal clear - auto-add immediately
-
-TRANSPARENCY & COMMUNICATION:
-• BE VERY VERBOSE about your step-by-step process as you work
-• Think out loud: "Let me search for jeera first..." → ACTUALLY call search_products() → "Found great options! Adding best one..." → ACTUALLY call add_to_cart()
-• Stream your thinking: "I'll help you make jeera rice. First searching for jeera..." → "Perfect! Now looking for rice..."
-• ALWAYS explicitly mention what you searched for and what you found
-• ALWAYS report what actions you took (added to cart, proceeded to checkout, etc.)
-• Show your intelligence: "I searched for jeera and found 2 options. Added the best one (₹120) to your cart."
-• For multi-ingredient recipes, mention all ingredients you handled step by step
-• Be conversational and talk through your process like a helpful friend
-
-EXAMPLE PERFECT BEHAVIOR:
-User: "search for jeera and add 1 to cart"
-You: "Let me search for jeera first..." *ACTUALLY calls search_products("jeera")* "Found 2 jeera options! Now adding the best one to your cart..." *ACTUALLY calls add_to_cart(best_jeera_option, 1)* "Perfect! I've added JEERA (₹120) from Himira Store to your cart!"
-
-User: "i need to make jeera rice"
-You: "I'll help you make jeera rice! Let me search for jeera first..." *ACTUALLY calls search_products("jeera")* "Found excellent jeera options! Adding the best one to your cart..." *ACTUALLY calls add_to_cart(jeera, 1)* "Great! Now let me search for rice..." *ACTUALLY calls search_products("rice")* "I've successfully added jeera to your cart (₹120). For rice, let me check what's available..."
-
-User: "i need some haldi for haldi ceremony"
-You: "Perfect! Let me find haldi for your ceremony..." *ACTUALLY calls search_products("haldi")* "Found excellent turmeric options! Adding the best one to your cart..." *ACTUALLY calls add_to_cart(best_haldi, 1)* "Excellent! I've added Turmeric (₹120) from Himira Store to your cart - perfect for your haldi ceremony!"
-
-🔧 EXECUTION VERIFICATION:
-• Always verify your function calls executed successfully
-• If a function doesn't execute, acknowledge it: "I'm having trouble with the search tool, let me try again..."
-• Never claim success without actual tool execution
-• The backend monitors for false claims and will flag hallucination
-
-Be the shopping expert who ACTUALLY takes action and clearly communicates what you did.""",
+Be proactive - calculate quantities intelligently, use tools, don't ask for confirmation!""",
                 server_names=["ondc-shopping"]  # Connects to our MCP server
             )
             
@@ -516,92 +492,69 @@ def sse_event(event_type: str, data: dict) -> str:
 # Removed hardcoded detection functions - agent should naturally understand requests
 
 def process_mcp_results(contents) -> tuple:
-    """Process MCP results and extract structured data with hallucination detection"""
+    """Process MCP results and extract structured data with comprehensive tracing"""
     response_text = ""
     structured_data = None
     context_type = None
     action_required = False
     function_calls_detected = False
     
-    # Debug logging to identify truncation issue
-    logger.info(f"[DEBUG] process_mcp_results called with contents type: {type(contents)}, length: {len(contents) if contents else 0}")
+    # ENHANCED LOGGING: Track response generation sources
+    logger.info(f"[RESPONSE-TRACE] process_mcp_results called with contents type: {type(contents)}")
+    if contents:
+        logger.info(f"[RESPONSE-TRACE] Contents length: {len(contents)}")
+    else:
+        logger.warning(f"[RESPONSE-TRACE] Contents is None/empty!")
     
     # Process MCP agent response structure
     if contents and len(contents) > 0:
         for i, content in enumerate(contents):
-            logger.info(f"[DEBUG] Content {i}: type={type(content)}, has_parts={hasattr(content, 'parts')}")
+            logger.info(f"[RESPONSE-TRACE] Processing content {i}: type={type(content)}")
             if hasattr(content, 'parts') and content.parts:
-                logger.info(f"[DEBUG] Content {i} has {len(content.parts)} parts")
+                logger.info(f"[RESPONSE-TRACE] Content {i} has {len(content.parts)} parts")
                 for j, part in enumerate(content.parts):
-                    logger.info(f"[DEBUG] Part {j}: has_text={hasattr(part, 'text')}, has_function_response={hasattr(part, 'function_response')}")
-                    
                     # Check text content
-                    if hasattr(part, 'text'):
-                        if part.text:
-                            text_preview = part.text[:100] + "..." if len(part.text) > 100 else part.text
-                            logger.info(f"[DEBUG] Part {j} text ({len(part.text)} chars): {text_preview}")
-                            response_text += part.text
-                        else:
-                            logger.info(f"[DEBUG] Part {j} has text attribute but text is empty/None")
+                    if hasattr(part, 'text') and part.text:
+                        logger.info(f"[RESPONSE-TRACE] Part {j} text ({len(part.text)} chars): {repr(part.text[:200])}")
+                        response_text += part.text
                     
                     # Check function response (separate from text - both can exist)
-                    if hasattr(part, 'function_response'):
-                        if part.function_response is not None:
-                            function_calls_detected = True
-                            logger.info(f"[DEBUG] Part {j} has function_response: {type(part.function_response)}")
-                            # Try different ways to access the structured data
-                            tool_result = None
-                            if hasattr(part.function_response, 'content'):
-                                logger.info(f"[DEBUG] function_response has content: {type(part.function_response.content)}")
-                                try:
-                                    if isinstance(part.function_response.content, str):
-                                        tool_result = json.loads(part.function_response.content)
-                                        logger.info(f"[DEBUG] Parsed JSON content: {str(tool_result)[:200]}...")
-                                    else:
-                                        tool_result = part.function_response.content
-                                        logger.info(f"[DEBUG] Direct content: {str(tool_result)[:200]}...")
-                                except (json.JSONDecodeError, AttributeError) as e:
-                                    logger.warning(f"[DEBUG] Failed to parse content: {e}")
-                            elif hasattr(part.function_response, 'result'):
-                                logger.info(f"[DEBUG] function_response has result: {type(part.function_response.result)}")
-                                tool_result = part.function_response.result
-                            elif isinstance(part.function_response, dict):
-                                logger.info(f"[DEBUG] function_response is dict: {str(part.function_response)[:200]}...")
-                                tool_result = part.function_response
-                            else:
-                                logger.info(f"[DEBUG] Trying to convert function_response to dict")
-                                try:
-                                    tool_result = dict(part.function_response)
-                                    logger.info(f"[DEBUG] Converted to dict: {str(tool_result)[:200]}...")
-                                except Exception as e:
-                                    logger.warning(f"[DEBUG] Could not extract structured data from function_response: {e}")
-                            
-                            if tool_result and isinstance(tool_result, dict):
-                                logger.info(f"[DEBUG] Setting structured_data from tool_result")
-                                structured_data = tool_result
-                                context_type, action_required = determine_context_type(tool_result)
-                                logger.info(f"[DEBUG] Context type: {context_type}, action_required: {action_required}")
+                    if hasattr(part, 'function_response') and part.function_response is not None:
+                        function_calls_detected = True
+                        logger.info(f"[RESPONSE-TRACE] Part {j} has function_response: {type(part.function_response)}")
+                        # Try different ways to access the structured data
+                        tool_result = None
+                        if hasattr(part.function_response, 'content'):
+                            try:
+                                if isinstance(part.function_response.content, str):
+                                    tool_result = json.loads(part.function_response.content)
+                                    logger.info(f"[RESPONSE-TRACE] Parsed JSON tool result: {json.dumps(tool_result, indent=2)[:500]}")
+                                else:
+                                    tool_result = part.function_response.content
+                                    logger.info(f"[RESPONSE-TRACE] Direct tool result: {str(tool_result)[:500]}")
+                            except (json.JSONDecodeError, AttributeError) as e:
+                                logger.warning(f"Failed to parse function response content: {e}")
+                        elif hasattr(part.function_response, 'result'):
+                            tool_result = part.function_response.result
+                            logger.info(f"[RESPONSE-TRACE] Result tool result: {str(tool_result)[:500]}")
+                        elif isinstance(part.function_response, dict):
+                            tool_result = part.function_response
+                            logger.info(f"[RESPONSE-TRACE] Dict tool result: {str(tool_result)[:500]}")
                         else:
-                            logger.warning(f"[DEBUG] Part {j} has function_response attribute but value is None - possible hallucination")
+                            try:
+                                tool_result = dict(part.function_response)
+                                logger.info(f"[RESPONSE-TRACE] Converted tool result: {str(tool_result)[:500]}")
+                            except Exception as e:
+                                logger.warning(f"Could not extract structured data from function_response: {e}")
+                        
+                        if tool_result and isinstance(tool_result, dict):
+                            structured_data = tool_result
+                            context_type, action_required = determine_context_type(tool_result)
+                            logger.info(f"[RESPONSE-TRACE] Extracted context_type: {context_type}, action_required: {action_required}")
     
-    # CRITICAL: Detect agent hallucination
-    # Check if agent claims to have performed actions without function calls
-    hallucination_indicators = [
-        "added to cart", "added", "i've added", "adding", 
-        "searched for", "found", "i found", "searching",
-        "proceeding", "proceeded", "checkout", "payment"
-    ]
-    
-    response_lower = response_text.lower()
-    claims_action = any(indicator in response_lower for indicator in hallucination_indicators)
-    
-    if claims_action and not function_calls_detected:
-        logger.error(f"[HALLUCINATION-DETECTED] Agent claims action but no function calls detected!")
-        logger.error(f"[HALLUCINATION-DETECTED] Response text: {response_text}")
-        # Add warning to response
-        response_text = "⚠️ I encountered an issue executing tools. Let me try again...\n\n" + response_text
-    elif function_calls_detected:
-        logger.info(f"[FUNCTION-CALLS] Verified function calls were executed properly")
+    # Log function call detection for debugging
+    if function_calls_detected:
+        logger.info("[FUNCTION-CALLS] Verified function calls were executed properly")
     
     # Clean up response text
     if response_text.startswith("None"):
@@ -609,11 +562,47 @@ def process_mcp_results(contents) -> tuple:
     
     response_text = response_text or "I'm ready to help you with your shopping needs!"
     
-    # Final debug logging
-    logger.info(f"[DEBUG] Final response_text ({len(response_text)} chars): {response_text[:200]}{'...' if len(response_text) > 200 else ''}")
-    logger.info(f"[DEBUG] structured_data present: {structured_data is not None}")
-    logger.info(f"[DEBUG] context_type: {context_type}")
-    logger.info(f"[DEBUG] function_calls_detected: {function_calls_detected}")
+    # CRITICAL: Validate agent response against structured data
+    if structured_data and context_type == 'cart':
+        logger.info(f"[RESPONSE-VALIDATION] Validating cart response against structured data")
+        cart_data = structured_data.get('cart', {})
+        
+        # Extract actual cart numbers from structured data
+        actual_total_items = cart_data.get('total_items', 0)
+        actual_total_value = cart_data.get('total_value', 0)
+        
+        logger.info(f"[RESPONSE-VALIDATION] Structured data shows: {actual_total_items} items, ₹{actual_total_value}")
+        logger.info(f"[RESPONSE-VALIDATION] Agent response text: {repr(response_text)}")
+        
+        # Check for number discrepancies in response text
+        import re
+        item_numbers = re.findall(r'(\d+)\s*items?', response_text.lower())
+        price_numbers = re.findall(r'₹(\d+(?:,\d+)*(?:\.\d+)?)', response_text)
+        
+        if item_numbers:
+            claimed_items = int(item_numbers[-1])  # Get last/most recent item count
+            logger.info(f"[RESPONSE-VALIDATION] Agent claims {claimed_items} items, actual: {actual_total_items}")
+            
+            if claimed_items != actual_total_items:
+                logger.error(f"[RESPONSE-VALIDATION] CART DISCREPANCY DETECTED!")
+                logger.error(f"[RESPONSE-VALIDATION] Agent claims: {claimed_items} items")
+                logger.error(f"[RESPONSE-VALIDATION] Backend reality: {actual_total_items} items")
+                # Replace with correct data
+                response_text = response_text.replace(f"{claimed_items} items", f"{actual_total_items} items")
+        
+        if price_numbers:
+            claimed_price = float(price_numbers[-1].replace(',', ''))  # Get last/most recent price
+            logger.info(f"[RESPONSE-VALIDATION] Agent claims ₹{claimed_price}, actual: ₹{actual_total_value}")
+            
+            if abs(claimed_price - actual_total_value) > 0.01:  # Allow for rounding
+                logger.error(f"[RESPONSE-VALIDATION] PRICE DISCREPANCY DETECTED!")
+                logger.error(f"[RESPONSE-VALIDATION] Agent claims: ₹{claimed_price}")
+                logger.error(f"[RESPONSE-VALIDATION] Backend reality: ₹{actual_total_value}")
+                # Replace with correct data
+                response_text = response_text.replace(f"₹{claimed_price}", f"₹{actual_total_value}")
+    
+    logger.info(f"[RESPONSE-TRACE] Final response_text: {repr(response_text[:200])}")
+    logger.info(f"[RESPONSE-TRACE] Final structured_data present: {structured_data is not None}")
     
     return response_text, structured_data, context_type, action_required
 
@@ -634,8 +623,6 @@ async def chat_stream(request: Request, chat_req: ChatRequest):
     create_or_update_session(session_id, device_id)
     
     async def robust_event_stream():
-        import asyncio
-        import concurrent.futures
         
         # Configurable SSE connection timeout (seconds)
         connection_timeout = int(os.getenv('SSE_CONNECTION_TIMEOUT', 300))
