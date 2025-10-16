@@ -922,7 +922,7 @@ class CheckoutService:
                 'message': ' Failed to initialize order. Please try again.'
             }
     
-    async def create_payment(self, session: Session, payment_method: str = 'razorpay') -> Dict[str, Any]:
+    async def create_payment(self, session: Session, payment_method: str = 'razorpay', amount: Optional[float] = None) -> Dict[str, Any]:
         """
         MOCK PAYMENT CREATION - Create mock payment between INIT and CONFIRM
         
@@ -993,7 +993,7 @@ class CheckoutService:
                     },
                     'next_step': 'verify_payment',  # Changed from confirm_order
                     'stage': 'payment_pending',
-                    'user_action_required': 'Complete payment using Razorpay SDK on frontend'
+                    'user_action_required': 'MOCK_PAYMENT'
                 }
             else:
                 # Real payment implementation would go here

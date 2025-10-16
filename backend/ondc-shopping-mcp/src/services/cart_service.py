@@ -878,9 +878,14 @@ class CartService:
                 logger.error(f"[Cart] item_data is not dict: {type(item_data)}")
                 return None
                 
-            # FIXED: descriptor and price are directly in item_data, not nested in 'product'
-            descriptor = item_data.get('descriptor', {})
-            price_data = item_data.get('price', {})
+            # FIXED: descriptor and price are nested in item_data.product
+            product_details = item_data.get('product', {})
+            if not isinstance(product_details, dict):
+                logger.error(f"[Cart] product_details is not dict: {type(product_details)}")
+                product_details = {}
+                
+            descriptor = product_details.get('descriptor', {})
+            price_data = product_details.get('price', {})
             
             # Extract essential fields with safe access
             item_id = backend_item.get('id', backend_item.get('item_id', ''))

@@ -418,6 +418,7 @@ async def initialize_order(
 async def create_payment(
     session_id: Optional[str] = None,
     payment_method: Optional[str] = 'razorpay',
+    amount: Optional[float] = None,
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -444,7 +445,7 @@ async def create_payment(
         
         # MOCK PAYMENT CREATION - Clear labeling
         logger.info(f"[MCP ADAPTER] Creating mock payment for session: {session_id}")
-        result = await checkout_service.create_payment(session_obj, payment_method)
+        result = await checkout_service.create_payment(session_obj, payment_method, amount)
         
         if result.get('success'):
             # Log mock payment creation with indicators
