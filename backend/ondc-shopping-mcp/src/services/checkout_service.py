@@ -260,7 +260,8 @@ class CheckoutService:
         session: Session, 
         delivery_city: str,
         delivery_state: str,
-        delivery_pincode: str
+        delivery_pincode: str,
+        address_auto_fetched: bool = False
     ) -> Dict[str, Any]:
         """
         BIAP-compatible ONDC SELECT stage - Get quotes and fulfillment options
@@ -567,12 +568,23 @@ class CheckoutService:
                 })
                 
                 logger.info("[CheckoutService]  SELECT successful - delivery quotes received")
+                
+                # Smart next_step based on address source
+                if address_auto_fetched:
+                    next_step = 'ready_for_initialize_order'
+                    message = f' Delivery confirmed for {delivery_city}! Now initializing order with your saved address...'
+                    logger.info(f"[CheckoutService] AUTO-ADDRESS: Ready to initialize_order with saved address")
+                else:
+                    next_step = 'provide_complete_delivery_details'
+                    message = f' Delivery available in {delivery_city}! Please provide your complete delivery details to proceed.'
+                    logger.info(f"[CheckoutService] MANUAL-ADDRESS: Need complete delivery details")
+                
                 return {
                     'success': True,
-                    'message': f' Delivery available in {delivery_city}! Quotes ready.',
+                    'message': message,
                     'stage': 'select_completed',
                     'quote_data': result,
-                    'next_step': 'provide_complete_delivery_details'
+                    'next_step': next_step
                 }
             else:
                 error_msg = result.get('message', 'Failed to get delivery quotes') if result else 'SELECT API failed'

@@ -248,9 +248,23 @@ Format: select_items_for_order(delivery_city='Bangalore', delivery_state='Karnat
             'pincode': delivery_pincode
         }
         
+        # Determine if address was auto-fetched for smart next_step guidance
+        address_auto_fetched = False
+        if session_location and all([session_location.get('city'), session_location.get('state'), session_location.get('pincode')]):
+            # Address from session storage
+            address_auto_fetched = True
+            logger.info(f"[SMART CHECKOUT DEBUG] Address source: session storage (auto)")
+        elif delivery_city and delivery_state and delivery_pincode:
+            # Check if we went through the auto-fetch path above
+            if session_obj.user_id and session_obj.user_id != "guestUser":
+                address_auto_fetched = True
+                logger.info(f"[SMART CHECKOUT DEBUG] Address source: backend auto-fetch (auto)")
+            else:
+                logger.info(f"[SMART CHECKOUT DEBUG] Address source: manual parameters (manual)")
+        
         # Call consolidated checkout service
         result = await checkout_service.select_items_for_order(
-            session_obj, delivery_city, delivery_state, delivery_pincode
+            session_obj, delivery_city, delivery_state, delivery_pincode, address_auto_fetched
         )
         
         # Save enhanced session with conversation tracking

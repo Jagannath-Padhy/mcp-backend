@@ -319,7 +319,7 @@ class CartService:
             if not user_id:
                 logger.warning("[Cart] No user_id in session for backend operation")
                 return False
-            device_id = getattr(session, 'device_id', f'mcp_{session.session_id[:8]}')
+            device_id = session.device_id
             
             logger.info(f"[Cart] Syncing {len(session.cart.items)} items with backend for user {user_id}, device {device_id}")
             
@@ -451,7 +451,7 @@ class CartService:
             if not user_id:
                 logger.warning("[Cart] No user_id in session for backend operation")
                 return False
-            device_id = getattr(session, 'device_id', f'mcp_{session.session_id[:8]}')
+            device_id = session.device_id
             
             result = await self.buyer_app.get_cart(user_id, device_id)
             logger.debug(f"[Cart] Backend cart for {user_id}/{device_id}: {result}")
@@ -495,7 +495,7 @@ class CartService:
             if not user_id:
                 logger.warning("[Cart] No user_id in session for backend operation")
                 return False
-            device_id = getattr(session, 'device_id', f'mcp_{session.session_id[:8]}')
+            device_id = session.device_id
             
             # Use backend API for multiple removal
             logger.info(f"[Cart] Calling backend API to remove {len(item_ids)} items for user {user_id}")
@@ -563,7 +563,7 @@ class CartService:
             if not user_id:
                 logger.warning("[Cart] No user_id in session for backend operation")
                 return False
-            device_id = getattr(session, 'device_id', f'mcp_{session.session_id[:8]}')
+            device_id = session.device_id
             
             # Determine which items to move
             items_to_move = []
@@ -808,7 +808,7 @@ class CartService:
         """
         try:
             user_id = session.user_id or "guestUser"
-            device_id = getattr(session, 'device_id', 'device_9bca8c59')
+            device_id = session.device_id
             
             logger.info(f"[Cart] Syncing backend cart to local - User: {user_id}, Device: {device_id}")
             
@@ -917,18 +917,18 @@ class CartService:
                 name=name,
                 price=price,
                 quantity=quantity,
-                local_id=product_data.get('id', item_data.get('local_id', '')),
+                local_id=item_data.get('local_id', ''),
                 bpp_id=item_data.get('bpp_id', ''),
                 bpp_uri=item_data.get('bpp_uri', ''),
                 contextCity=item_data.get('contextCity'),
-                category=product_data.get('category_id'),
+                category=item_data.get('category_id', ''),
                 image_url=image_url,
                 description=description,
-                product=product_data,
+                product=item_data,
                 provider=provider_data,
-                location_id=product_data.get('location_id'),
-                fulfillment_id=product_data.get('fulfillment_id'),
-                parent_item_id=product_data.get('parent_item_id'),
+                location_id=item_data.get('location_id', ''),
+                fulfillment_id=item_data.get('fulfillment_id', ''),
+                parent_item_id=item_data.get('parent_item_id', ''),
                 tags=item_data.get('tags'),
                 customisations=backend_item.get('customisations')
             )

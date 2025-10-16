@@ -53,22 +53,39 @@ def get_persistent_session(session_id: Optional[str] = None, tool_name: str = "u
     provided_user_id = kwargs.get('userId') or kwargs.get('user_id')
     provided_device_id = kwargs.get('deviceId') or kwargs.get('device_id')
     
-    # Handle user_id
-    if provided_user_id:
-        if not session_obj.user_id or session_obj.user_id != provided_user_id:
-            session_obj.user_id = provided_user_id
-            logger.debug(f"[Session] Applied userId from kwargs: {provided_user_id}")
+    # CRITICAL FIX: Don't overwrite real authenticated credentials with guestUser defaults
+    # Only apply kwargs if session doesn't have authenticated credentials or if kwargs contain real auth data
     
-    # Handle device_id - only update if explicitly provided (not null/empty)
-    if provided_device_id:
-        if not session_obj.device_id or session_obj.device_id != provided_device_id:
+    # Handle user_id - protect against guestUser contamination
+    if provided_user_id and provided_user_id != "guestUser":
+        # Only apply real user IDs (not guestUser fallback)
+        if not session_obj.user_id or session_obj.user_id == "guestUser":
+            session_obj.user_id = provided_user_id
+            logger.debug(f"[Session] Applied REAL userId from kwargs: {provided_user_id}")
+    elif provided_user_id == "guestUser" and session_obj.user_id and session_obj.user_id != "guestUser":
+        # Don't overwrite real credentials with guestUser
+        logger.debug(f"[Session] PROTECTED stored userId {session_obj.user_id} from guestUser contamination")
+    elif provided_user_id and not session_obj.user_id:
+        # Only as last resort when session has no user_id
+        session_obj.user_id = provided_user_id
+        logger.debug(f"[Session] Applied fallback userId from kwargs: {provided_user_id}")
+    
+    # Handle device_id - protect against device_* contamination  
+    if provided_device_id and not provided_device_id.startswith("device_"):
+        # Only apply real device IDs (not generated device_* patterns)
+        if not session_obj.device_id or session_obj.device_id.startswith("device_"):
             session_obj.device_id = provided_device_id
-            logger.debug(f"[Session] Applied deviceId from kwargs: {provided_device_id}")
-    else:
-        # If deviceId is null/empty in kwargs, preserve existing session device_id
-        # This prevents generating new device IDs when the session already has one
-        if session_obj.device_id:
-            logger.debug(f"[Session] Preserving existing deviceId: {session_obj.device_id}")
+            logger.debug(f"[Session] Applied REAL deviceId from kwargs: {provided_device_id}")
+    elif provided_device_id and provided_device_id.startswith("device_") and session_obj.device_id and not session_obj.device_id.startswith("device_"):
+        # Don't overwrite real credentials with generated device_*
+        logger.debug(f"[Session] PROTECTED stored deviceId {session_obj.device_id} from device_* contamination")
+    elif provided_device_id and not session_obj.device_id:
+        # Only as last resort when session has no device_id
+        session_obj.device_id = provided_device_id
+        logger.debug(f"[Session] Applied fallback deviceId from kwargs: {provided_device_id}")
+    elif not provided_device_id and session_obj.device_id:
+        # Preserve existing session device_id when kwargs don't provide one
+        logger.debug(f"[Session] Preserving existing deviceId: {session_obj.device_id}")
     
     # CRITICAL: Mark session as authenticated for backend operations if we have both user_id and device_id
     if session_obj.user_id and session_obj.device_id and not session_obj.user_authenticated:

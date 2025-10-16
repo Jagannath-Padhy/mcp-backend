@@ -15,28 +15,33 @@ Key Features:
 - Comprehensive error handling
 
 === AGENT INSTRUCTIONS ===
-You are an ONDC shopping assistant operating in GUEST MODE.
-Guest credentials are pre-configured:
-- userId: guestUser
-- deviceId: d58dc5e2119ae5430b93218937977939
+You are an ONDC shopping assistant that works with authenticated user sessions.
+User credentials are managed through session persistence:
+- userId: Retrieved from session storage
+- deviceId: Retrieved from session storage
 
-Order Journey Flow (complete up to on_init):
-1. initialize_shopping → Create guest session
-2. search_products → Find products
+Order Journey Flow (automated for authenticated users):
+1. initialize_shopping → Create authenticated session
+2. search_products → Find products  
 3. add_to_cart → Add to cart (auto-detects from search)
 4. view_cart → Show cart contents
-5. select_items_for_order → Get delivery quotes (needs city, state, pincode)
-6. initialize_order → Set customer details (name, address, phone, email)
-7. [on_init response received - order draft ready]
-8. create_payment → [MOCK] Create test payment
-9. confirm_order → [MOCK] Confirm with mock payment
+5. "proceed to checkout" → AUTOMATED WORKFLOW:
+   a. select_items_for_order → Auto-fetches saved address, gets delivery quotes
+   b. initialize_order → Auto-fills customer details from saved data
+   c. create_payment → Prepare payment
+   d. confirm_order → Complete order
+
+AUTOMATED BEHAVIOR:
+- When select_items_for_order succeeds with saved address → IMMEDIATELY call initialize_order
+- When initialize_order succeeds → IMMEDIATELY proceed to payment
+- NEVER ask "would you like to..." when automation is possible
+- USE SAVED ADDRESS DATA automatically for authenticated users
+- Guide users seamlessly through automated checkout experience
 
 IMPORTANT:
-- Never ask for login/authentication
-- Guide users sequentially through the flow
-- Collect required info at each stage
-- Mark [MOCK] for payment/confirm operations
-- See mcp_agent_instructions.md for detailed guidance
+- For authenticated users: AUTOMATE the entire checkout flow
+- When address auto-fetch works: proceed directly to next step
+- Only ask for input when automation fails or data is missing
 """
 
 import logging
@@ -385,8 +390,8 @@ def create_standard_tool(name: str, adapter_func, docstring: str, extra_params: 
     
     This factory function reduces code duplication by generating tools
     with the standard parameters that almost all tools share:
-    - userId (default: guestUser)
-    - deviceId (optional)
+    - userId (optional, from session)
+    - deviceId (optional, from session)
     - session_id (optional)
     
     Args:
@@ -398,7 +403,7 @@ def create_standard_tool(name: str, adapter_func, docstring: str, extra_params: 
     # Define the standard parameters that all tools have
     standard_params = {
         'ctx': 'Context',
-        'userId': 'Optional[str] = "guestUser"',
+        'userId': 'Optional[str] = None',
         'deviceId': 'Optional[str] = None',
         'session_id': 'Optional[str] = None'
     }
@@ -427,7 +432,7 @@ async def add_to_cart(
     ctx: Context,
     item: Dict[str, Any],
     quantity: int = 1,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -443,7 +448,7 @@ async def add_to_cart(
 @mcp.tool()
 async def view_cart(
     ctx: Context,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -459,7 +464,7 @@ async def update_cart_quantity(
     ctx: Context,
     item_id: str,
     quantity: int,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -472,7 +477,7 @@ async def update_cart_quantity(
 async def remove_from_cart(
     ctx: Context,
     item_id: str,
-    userId: Optional[str] = "guestUser", 
+    userId: Optional[str] = None, 
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -484,7 +489,7 @@ async def remove_from_cart(
 @mcp.tool()
 async def clear_cart(
     ctx: Context,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -495,7 +500,7 @@ async def clear_cart(
 @mcp.tool()
 async def get_cart_total(
     ctx: Context,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -517,7 +522,7 @@ async def search_products(
     relevance_threshold: Optional[float] = None,
     adaptive_results: bool = True,
     context_aware: bool = True,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -551,7 +556,7 @@ async def search_products(
 async def advanced_search(
     ctx: Context,
     filters: Dict[str, Any],
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -564,7 +569,7 @@ async def advanced_search(
 async def browse_categories(
     ctx: Context,
     parent_category: Optional[str] = None,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -583,7 +588,7 @@ async def select_items_for_order(
     delivery_city: Optional[str] = None,
     delivery_state: Optional[str] = None,
     delivery_pincode: Optional[str] = None,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -599,7 +604,7 @@ async def select_items_for_order(
         delivery_city: City name (e.g., "Bangalore") - Optional, will auto-fetch if available
         delivery_state: State name (e.g., "Karnataka") - Optional, will auto-fetch if available  
         delivery_pincode: PIN code (e.g., "560001") - Optional, will auto-fetch if available
-        userId: User ID (default: guestUser)
+        userId: User ID (from session)
         deviceId: Device identifier
         session_id: Session identifier
         
@@ -622,7 +627,7 @@ async def initialize_order(
     city: Optional[str] = None,
     state: Optional[str] = None,
     pincode: Optional[str] = None,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -643,7 +648,7 @@ async def initialize_order(
         city: Delivery city (optional - uses SELECT stage data if not provided)
         state: Delivery state (optional - uses SELECT stage data if not provided)
         pincode: Delivery PIN code (optional - uses SELECT stage data if not provided)
-        userId: User ID (default: guestUser)
+        userId: User ID (from session)
         deviceId: Device identifier
         session_id: Session identifier
         
@@ -661,7 +666,7 @@ async def create_payment(
     ctx: Context,
     payment_method: str,
     amount: float,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -676,7 +681,7 @@ async def verify_payment(
     payment_status: str,
     payment_id: Optional[str] = None,
     razorpay_payment_id: Optional[str] = None,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -698,7 +703,7 @@ async def verify_payment(
 @mcp.tool()
 async def get_payment_status(
     ctx: Context,
-    userId: Optional[str] = "guestUser", 
+    userId: Optional[str] = None, 
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -714,7 +719,7 @@ async def get_payment_status(
 async def confirm_order(
     ctx: Context,
     payment_status: str = "PAID",
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -726,7 +731,7 @@ async def confirm_order(
     
     Args:
         payment_status: Payment status - "PAID", "PENDING", or "FAILED" (default: "PAID" for mock mode)
-        userId: User ID (default: guestUser)
+        userId: User ID (from session)
         deviceId: Device identifier
         session_id: Session identifier
         
@@ -746,7 +751,7 @@ async def initialize_shopping(
     ctx: Context,
     user_preferences: Optional[Dict[str, Any]] = None,
     location: Optional[str] = None,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -758,7 +763,7 @@ async def initialize_shopping(
 @mcp.tool()
 async def get_session_info(
     ctx: Context,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -775,7 +780,7 @@ async def initiate_payment(
     ctx: Context,
     order_id: str,
     payment_details: Dict[str, Any],
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -788,7 +793,7 @@ async def initiate_payment(
 async def confirm_order_simple(
     ctx: Context,
     order_id: str,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -801,7 +806,7 @@ async def confirm_order_simple(
 async def get_order_status(
     ctx: Context,
     order_id: str,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
@@ -814,7 +819,7 @@ async def get_order_status(
 async def track_order(
     ctx: Context,
     order_id: str,
-    userId: Optional[str] = "guestUser",
+    userId: Optional[str] = None,
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
