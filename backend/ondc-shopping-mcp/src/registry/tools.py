@@ -213,12 +213,12 @@ class ToolRegistry:
         # ========== ONDC Order Flow ==========
         self.register(ToolDefinition(
             name="select_items_for_order",
-            description="BIAP-enhanced ONDC SELECT: Get delivery quotes with product enrichment",
+            description="🚀 CHECKOUT ENTRY POINT: Always start checkout here! Get delivery quotes for cart items (ONDC SELECT stage). Use this when user wants to 'checkout', 'proceed with address', or 'start order process'.",
             adapter=select_items_for_order_adapter,
             parameters={
-                "delivery_city": {"type": "string", "description": "Delivery city"},
-                "delivery_state": {"type": "string", "description": "Delivery state"},
-                "delivery_pincode": {"type": "string", "description": "Delivery pincode"},
+                "delivery_city": {"type": "string", "description": "Delivery city (optional - auto-fetched from saved addresses)"},
+                "delivery_state": {"type": "string", "description": "Delivery state (optional - auto-fetched from saved addresses)"},
+                "delivery_pincode": {"type": "string", "description": "Delivery pincode (optional - auto-fetched from saved addresses)"},
                 "session_id": {"type": "string", "description": "Optional session ID"}
             },
             category="order"
@@ -226,20 +226,20 @@ class ToolRegistry:
         
         self.register(ToolDefinition(
             name="initialize_order",
-            description="BIAP-enhanced ONDC INIT: Initialize order with delivery details",
+            description="⚡ STEP 2: Initialize order with customer details (ONDC INIT stage). ⚠️ REQUIRES: Must call select_items_for_order first! Auto-extracts customer details from saved addresses.",
             adapter=initialize_order_adapter,
             parameters={
-                "customer_name": {"type": "string", "description": "Customer's full name"},
-                "delivery_address": {"type": "string", "description": "Complete street address"},
-                "phone": {"type": "string", "description": "Contact phone number"},
-                "email": {"type": "string", "description": "Contact email address"},
+                "customer_name": {"type": "string", "description": "Customer's full name (optional - auto-extracted from saved addresses)"},
+                "delivery_address": {"type": "string", "description": "Complete street address (optional - auto-extracted from saved addresses)"},
+                "phone": {"type": "string", "description": "Contact phone number (optional - auto-extracted from saved addresses)"},
+                "email": {"type": "string", "description": "Contact email address (optional - auto-extracted from saved addresses)"},
                 "payment_method": {
                     "type": "string",
-                    "description": "Payment method: razorpay, upi, card, netbanking"
+                    "description": "Payment method: razorpay, upi, card, netbanking (default: razorpay)"
                 },
-                "city": {"type": "string", "description": "City (optional)"},
-                "state": {"type": "string", "description": "State (optional)"},
-                "pincode": {"type": "string", "description": "Pincode (optional)"},
+                "city": {"type": "string", "description": "City (optional - auto-extracted)"},
+                "state": {"type": "string", "description": "State (optional - auto-extracted)"},
+                "pincode": {"type": "string", "description": "Pincode (optional - auto-extracted)"},
                 "session_id": {"type": "string", "description": "Optional session ID"}
             },
             category="order"
@@ -247,7 +247,7 @@ class ToolRegistry:
         
         self.register(ToolDefinition(
             name="create_payment",
-            description="MOCK PAYMENT: Create mock payment using Himira Postman values",
+            description="💳 STEP 3: Create payment order (MOCK mode). ⚠️ REQUIRES: Must call initialize_order first! Prepares payment and STOPS for user payment completion.",
             adapter=create_payment_adapter,
             parameters={
                 "payment_method": {
@@ -261,7 +261,7 @@ class ToolRegistry:
         
         self.register(ToolDefinition(
             name="confirm_order",
-            description="BIAP-enhanced ONDC CONFIRM: Complete order with payment validation",
+            description="CHECKOUT FINAL STEP: Confirm order after payment (ONDC CONFIRM)",
             adapter=confirm_order_adapter,
             parameters={
                 "payment_status": {

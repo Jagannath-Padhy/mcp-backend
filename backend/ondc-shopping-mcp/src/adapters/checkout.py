@@ -461,7 +461,7 @@ async def create_payment(
                 f"Payment ID: {payment_id}\n"
                 f"Amount: ₹{result['data']['amount']} INR\n"
                 f"Status: {result['data']['status']}\n\n"
-                f" Ready for order confirmation. Use 'confirm_order' next.",
+                f"🔄 **Next Step**: Complete payment and call verify_payment with status='PAID' to proceed.",
                 session_obj.session_id,
                 stage=result.get('stage'),  # Add stage field from checkout service
                 payment_data=result['data'],
@@ -515,8 +515,8 @@ async def confirm_order(
             from ..config import config
             session_obj.device_id = config.guest.device_id
         
-        # Validate session is in INIT stage
-        if session_obj.checkout_state.stage.value != 'init':
+        # Validate session is in INIT or PAYMENT_PENDING stage
+        if session_obj.checkout_state.stage.value not in ['init', 'payment_pending']:
             return format_mcp_response(
                 False,
                 ' Please complete delivery and payment details first using initialize_order.',

@@ -81,9 +81,9 @@ async def verify_payment(
         successful_statuses = ['PAID', 'SUCCESS', 'CAPTURED', 'AUTHORIZED']
         if payment_status in successful_statuses:
             # Payment successful - ready for order confirmation
-            success_message = f" Payment verified successfully! Status: {payment_status}"
+            success_message = f"✅ Payment verified successfully! Status: {payment_status}\n\n🚀 **Proceeding to order confirmation automatically...**"
             next_step = "confirm_order"
-            user_action = "Order is ready for confirmation. Use 'confirm_order' to finalize."
+            user_action = "Order confirmation will proceed automatically."
             
             # Send payment success data to frontend via SSE
             raw_data_for_sse = {

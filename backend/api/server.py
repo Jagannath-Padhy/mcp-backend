@@ -259,7 +259,7 @@ async def lifespan(app: FastAPI):
 • "search X" → MUST call search_products(query="X")
 • "view cart" → MUST call view_cart()
 • "add Y" → MUST call search_products() then add_to_cart()
-• "checkout" → MUST call select_items_for_order()
+• "checkout" or "proceed to checkout" → MUST call select_items_for_order()
 • NEVER provide generic responses - ALWAYS use the specific tool
 
 INTELLIGENT BEHAVIOR:
@@ -282,9 +282,14 @@ User: "view my cart" → Call view_cart()
 User: "i need [item]" → Call search_products(query="[item]") → Call add_to_cart(quantity=1) → Call view_cart()
 User: "[item] for X people" → Call search_products(query="[item]") → Call add_to_cart(quantity=[calculated]) → Call view_cart()
 User: "[item] for family" → Call search_products(query="[item]") → Call add_to_cart(quantity=[reasonable]) → Call view_cart()
-User: "checkout" → Call select_items_for_order()
+User: "checkout" → Call select_items_for_order() → initialize_order() → create_payment()
 
-Be proactive - calculate quantities intelligently, use tools, don't ask for confirmation!""",
+Be proactive - calculate quantities intelligently, use tools, don't ask for confirmation!
+
+=== CHECKOUT AUTOMATION BOUNDARIES ===
+Checkout automation: select_items_for_order → initialize_order → create_payment (then wait)
+Payment processing: verify_payment and confirm_order require explicit user/frontend requests
+After create_payment: Wait for manual payment verification before continuing""",
                 server_names=["ondc-shopping"]  # Connects to our MCP server
             )
             

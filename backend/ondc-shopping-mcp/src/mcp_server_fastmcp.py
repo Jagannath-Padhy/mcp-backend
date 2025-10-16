@@ -20,28 +20,49 @@ User credentials are managed through session persistence:
 - userId: Retrieved from session storage
 - deviceId: Retrieved from session storage
 
-Order Journey Flow (automated for authenticated users):
+Order Journey Flow:
 1. initialize_shopping → Create authenticated session
 2. search_products → Find products  
 3. add_to_cart → Add to cart (auto-detects from search)
 4. view_cart → Show cart contents
-5. "proceed to checkout" → AUTOMATED WORKFLOW:
+
+AUTOMATED CHECKOUT WORKFLOW (Phase 1 - Ends at Payment Creation):
+5. "proceed to checkout" → select_items_for_order → initialize_order → create_payment → STOP
    a. select_items_for_order → Auto-fetches saved address, gets delivery quotes
    b. initialize_order → Auto-fills customer details from saved data
-   c. create_payment → Prepare payment
-   d. confirm_order → Complete order
+   c. create_payment → Create payment order and STOP AUTOMATION
+
+MANUAL PAYMENT WORKFLOW (Phase 2 - User/Frontend Driven):
+6. [USER COMPLETES PAYMENT] → User pays via frontend Razorpay/UPI
+7. verify_payment → Frontend calls this after successful payment
+8. confirm_order → Automatic ONLY after verify_payment succeeds
 
 AUTOMATED BEHAVIOR:
+PHASE 1 - Address & Order Setup (FULLY AUTOMATED):
+- When user says "checkout", "proceed with address", "start order" → ALWAYS start with select_items_for_order
 - When select_items_for_order succeeds with saved address → IMMEDIATELY call initialize_order
-- When initialize_order succeeds → IMMEDIATELY proceed to payment
-- NEVER ask "would you like to..." when automation is possible
-- USE SAVED ADDRESS DATA automatically for authenticated users
-- Guide users seamlessly through automated checkout experience
+- When initialize_order succeeds → IMMEDIATELY call create_payment
+- When create_payment succeeds → STOP ALL AUTOMATION IMMEDIATELY
 
-IMPORTANT:
-- For authenticated users: AUTOMATE the entire checkout flow
-- When address auto-fetch works: proceed directly to next step
-- Only ask for input when automation fails or data is missing
+PHASE 2 - Payment Processing (MANUAL/FRONTEND ONLY):
+- After create_payment → DO NOT call any more tools automatically
+- verify_payment → ONLY called manually by user/frontend after payment completion
+- confirm_order → ONLY called automatically AFTER manual verify_payment succeeds
+- USE SAVED ADDRESS DATA automatically for authenticated users in Phase 1 only
+
+CRITICAL PHRASE MAPPING:
+- "proceed with default address" = select_items_for_order (NOT initialize_order)
+- "checkout" = select_items_for_order (NOT initialize_order)
+- "start order process" = select_items_for_order (NOT initialize_order)
+
+IMPORTANT - AUTOMATION BOUNDARIES:
+- NEVER call initialize_order first, even if user mentions address/customer details
+- ALWAYS start checkout flow with select_items_for_order
+- AUTOMATE ONLY: select_items_for_order → initialize_order → create_payment
+- NEVER AUTOMATE: verify_payment or confirm_order (these are manual/frontend only)
+- STOP ALL AUTOMATION: immediately after create_payment succeeds
+- DO NOT CALL: verify_payment automatically - wait for manual user/frontend call
+- MANUAL STEPS: Payment completion, payment verification, order confirmation
 """
 
 import logging
@@ -592,10 +613,10 @@ async def select_items_for_order(
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
-    """Get delivery quotes and options for items in cart (ONDC SELECT stage).
+    """🚀 CHECKOUT ENTRY POINT: Always start checkout here! (ONDC SELECT stage)
     
-    This initiates the checkout process by checking delivery availability
-    and getting quotes for the items in your cart.
+    Use this when user wants to 'checkout', 'proceed with address', or 'start order process'.
+    This initiates the checkout process by checking delivery availability and getting quotes.
     
     SMART AUTOMATION: Can be called without parameters to auto-fetch saved addresses.
     MANUAL MODE: Provide delivery_city, delivery_state, delivery_pincode manually.
@@ -631,10 +652,10 @@ async def initialize_order(
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
-    """Initialize order with customer and delivery details (ONDC INIT stage).
+    """⚡ STEP 2: Initialize order with customer details (ONDC INIT stage).
     
-    Prepares the order with complete billing and shipping information
-    after getting delivery quotes from SELECT stage.
+    ⚠️ REQUIRES: Must call select_items_for_order first!
+    Prepares the order with complete billing and shipping information after getting delivery quotes.
     
     SMART AUTOMATION: Can be called without parameters to auto-extract customer details from saved addresses.
     MANUAL MODE: Provide customer_name, delivery_address, phone, email manually.
@@ -784,7 +805,7 @@ async def initiate_payment(
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
-    """Initiate payment for an existing order."""
+    """Initiate payment for an existing order (real implementation)."""
     return await handle_tool_execution("initiate_payment", payment_init_adapter, ctx,
                                      order_id=order_id, payment_details=payment_details,
                                      userId=userId, deviceId=deviceId, session_id=session_id)
@@ -797,7 +818,7 @@ async def confirm_order_simple(
     deviceId: Optional[str] = None,
     session_id: Optional[str] = None
 ) -> str:
-    """Confirm an order with simplified parameters."""
+    """Confirm an order with simplified parameters (real implementation)."""
     return await handle_tool_execution("confirm_order_simple", confirm_simple_adapter, ctx,
                                      order_id=order_id, userId=userId, deviceId=deviceId,
                                      session_id=session_id)

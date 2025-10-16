@@ -906,7 +906,7 @@ class CheckoutService:
                         'payment': payment_method.upper()
                     },
                     'init_data': result,
-                    'next_step': 'confirm_order'
+                    'next_step': 'create_payment'
                 }
             else:
                 error_msg = result.get('message', 'Failed to initialize order') if result else 'INIT API failed'
@@ -991,9 +991,9 @@ class CheckoutService:
                             'requires_user_payment': True
                         }
                     },
-                    'next_step': 'verify_payment',  # Changed from confirm_order
+                    'next_step': 'user_payment_required',  # User must complete payment before verification
                     'stage': 'payment_pending',
-                    'user_action_required': 'MOCK_PAYMENT'
+                    'user_action_required': 'Complete payment and call verify_payment with status="PAID"'
                 }
             else:
                 # Real payment implementation would go here
