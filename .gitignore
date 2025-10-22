@@ -6,11 +6,9 @@
 # Reference implementations (keep locally, don't commit)
 biap-client-node-js/
 himira-nextjs-frontend-main/
-/tests
-# Documentation (keep locally, don't commit)
-*.md
-!README.md
-*.postman_collection.json
+
+# Archives
+archive/
 
 # Test files
 test_*.py
@@ -21,6 +19,7 @@ data/
 logs/
 sessions/
 backend/logs/
+test_logs/
 
 # Configuration (generated at runtime)
 backend/mcp_agent.config.yaml
@@ -34,6 +33,7 @@ __pycache__/
 .Python
 venv/
 env/
+.mypy_cache/
 
 # IDE
 .vscode/
@@ -58,3 +58,4 @@ build/
 dist/
 *.egg-info/
 Himira Order.postman_collection (2).json
+.continue/mcpServers/new-mcp-server.yaml

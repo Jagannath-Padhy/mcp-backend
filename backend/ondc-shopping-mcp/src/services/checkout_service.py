@@ -897,7 +897,7 @@ class CheckoutService:
                 
                 return {
                     'success': True,
-                    'message': f' Order initialized successfully!',
+                    'message': f' Order initialized successfully! Your order will be delivered to: {delivery_address}. Contact: {phone}, {email}. Payment method: {payment_method.upper()}',
                     'stage': 'init_completed',
                     'order_summary': {
                         'items': session.cart.total_items,
@@ -1311,7 +1311,7 @@ class CheckoutService:
                 
                 return {
                     'success': True,
-                    'message': f' Order confirmed successfully!',
+                    'message': f" Order confirmed successfully! Your order will be delivered to: {delivery_address}",
                     'order_id': order_id,
                     'order_details': {
                         'order_id': order_id,
