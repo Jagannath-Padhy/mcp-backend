@@ -1,0 +1,726 @@
+{
+	"info": {
+		"_postman_id": "030868a2-99ec-452c-8a11-4491d110afbe",
+		"name": "ONDC MCP SSE Streaming - Complete Shopping Journey",
+		"description": "Complete end-to-end shopping journey via SSE streaming with agent thoughts and structured data. Tests full SELECT → INIT → CONFIRM ONDC flow with session continuity using real Himira credentials.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json",
+		"_exporter_id": "44305889"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Health check successful\", function () {",
+							"    pm.response.to.have.status(200);",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.status).to.eql(\"healthy\");",
+							"    console.log(\"✅ Backend is healthy\");",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": "{{BASE_URL}}/health"
+			},
+			"response": []
+		},
+		{
+			"name": "1. Initialize Shopping Session (SSE)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"SSE Session initialization successful\", function () {",
+							"    pm.response.to.have.status(200);",
+							"    const responseText = pm.response.text();",
+							"    ",
+							"    // Parse SSE events to find session_id",
+							"    const events = responseText.split('\\n\\n').filter(line => line.startsWith('data:'));",
+							"    let sessionId = null;",
+							"    ",
+							"    for (let event of events) {",
+							"        try {",
+							"            const data = JSON.parse(event.replace('data: ', ''));",
+							"            if (data.session_id) {",
+							"                sessionId = data.session_id;",
+							"                break;",
+							"            }",
+							"        } catch (e) { /* ignore parse errors */ }",
+							"    }",
+							"    ",
+							"    // Extract session_id for subsequent requests",
+							"    if (sessionId) {",
+							"        pm.environment.set('SESSION_ID', sessionId);",
+							"        console.log('✅ Session ID captured from SSE:', sessionId);",
+							"    }",
+							"    ",
+							"    // Validate SSE response contains session ready message",
+							"    pm.expect(responseText).to.include('thinking');",
+							"    pm.expect(responseText).to.include('response');",
+							"    pm.expect(responseText).to.include('[DONE]');",
+							"    ",
+							"    console.log('🎯 SSE Stream completed successfully');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Accept",
+						"value": "text/event-stream"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"message\": \"shop on himira with userId: {{USER_ID}} deviceid: {{DEVICE_ID}}\"\n}"
+				},
+				"url": "{{BASE_URL}}/api/v1/chat/stream",
+				"description": "Initialize shopping session via SSE streaming. Expected events:\n- thinking: Agent processing initialization\n- response: Session ready confirmation\n- [DONE]: Stream completion\n\nNo session_id provided - backend generates and returns one."
+			},
+			"response": [
+				{
+					"name": "1. Initialize Shopping Session (SSE)",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "text/event-stream"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"shop on himira with userId: {{USER_ID}} deviceid: {{DEVICE_ID}}\"\n}"
+						},
+						"url": "{{BASE_URL}}/api/v1/chat/stream"
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "",
+					"header": [
+						{
+							"key": "date",
+							"value": "Thu, 16 Oct 2025 08:14:43 GMT"
+						},
+						{
+							"key": "server",
+							"value": "uvicorn"
+						},
+						{
+							"key": "content-type",
+							"value": "text/event-stream; charset=utf-8"
+						},
+						{
+							"key": "Transfer-Encoding",
+							"value": "chunked"
+						}
+					],
+					"cookie": [],
+					"body": "data: {\"type\": \"thinking\", \"message\": \"Analyzing your request...\", \"timestamp\": \"2025-10-16T08:14:44.060308\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\"}\n\ndata: {\"type\": \"thinking\", \"message\": \"Understanding your request...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\"}\n\ndata: {\"type\": \"thinking\", \"message\": \"Processing with available tools...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\"}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Let me help you with that...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"stage\": \"initial\"}\n\ndata: {\"type\": \"tool_start\", \"tool_name\": \"initialize_shopping\", \"message\": \"Executing initialize_shopping...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:14:47.898349\", \"execution_time_ms\": null, \"success\": null}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Executing initialize_shopping...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"stage\": \"tool_execution\"}\n\ndata: {\"type\": \"tool_complete\", \"tool_name\": \"initialize_shopping\", \"message\": \"Completed initialize_shopping in 383ms\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:14:48.284202\", \"execution_time_ms\": 383.4102153778076, \"success\": true}\n\ndata: {\"type\": \"response\", \"content\": \"Your shopping session has been initialized! You can now start searching for products, browsing categories, or viewing your cart.\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:14:51.178971\", \"complete\": true}\n\ndata: [DONE]\n\n"
+				}
+			]
+		},
+		{
+			"name": "2. Jeera for jeera rice (SSE)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"SSE Search successful - Turmeric found\", function () {",
+							"    pm.response.to.have.status(200);",
+							"    const responseText = pm.response.text();",
+							"    ",
+							"    // Validate SSE search results",
+							"    pm.expect(responseText).to.include('thinking');",
+							"    pm.expect(responseText).to.include('products');",
+							"    pm.expect(responseText).to.include('response');",
+							"    pm.expect(responseText).to.include('[DONE]');",
+							"    ",
+							"    // Check for turmeric in search results",
+							"    pm.expect(responseText.toLowerCase()).to.include('turmeric');",
+							"    ",
+							"    console.log('🔍 SSE Search Results received');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Accept",
+						"value": "text/event-stream"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"message\": \"search for turmeric\",\n  \"session_id\": \"{{SESSION_ID}}\"\n}"
+				},
+				"url": "{{BASE_URL}}/api/v1/chat/stream",
+				"description": "Search for turmeric via SSE streaming. Expected events:\n- thinking: Agent analyzing search request\n- tool_start: Search execution begins\n- products: Structured product data for turmeric\n- response: Final search results summary\n- [DONE]: Stream completion"
+			},
+			"response": [
+				{
+					"name": "2. Search for Turmeric (SSE)",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "text/event-stream"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"i need jeera for making jeera rice for 50 people\",\n  \"session_id\": \"{{SESSION_ID}}\"\n}"
+						},
+						"url": "{{BASE_URL}}/api/v1/chat/stream"
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "",
+					"header": [
+						{
+							"key": "date",
+							"value": "Thu, 16 Oct 2025 08:07:21 GMT"
+						},
+						{
+							"key": "server",
+							"value": "uvicorn"
+						},
+						{
+							"key": "content-type",
+							"value": "text/event-stream; charset=utf-8"
+						},
+						{
+							"key": "Transfer-Encoding",
+							"value": "chunked"
+						}
+					],
+					"cookie": [],
+					"body": "data: {\"type\": \"thinking\", \"message\": \"Analyzing your request...\", \"timestamp\": \"2025-10-16T08:07:21.334726\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\"}\n\ndata: {\"type\": \"thinking\", \"message\": \"Understanding your request...\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\"}\n\ndata: {\"type\": \"thinking\", \"message\": \"Processing with available tools...\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\"}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Let me help you with that...\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"stage\": \"initial\"}\n\ndata: {\"type\": \"tool_start\", \"tool_name\": \"search_products\", \"message\": \"Executing search_products...\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"timestamp\": \"2025-10-16T08:07:26.358997\", \"execution_time_ms\": null, \"success\": null}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Executing search_products...\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"stage\": \"tool_execution\"}\n\ndata: {\"type\": \"raw_products\", \"tool_name\": \"search_products\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"raw_data\": true, \"biap_specifications\": true, \"timestamp\": \"2025-10-16T08:07:28.013960\", \"products\": [{\"item_details\": {\"id\": \"de91d866-77e1-4e60-a255-82bbc30631c6\", \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-10T07:25:40.219Z\"}, \"parent_item_id\": \"\", \"descriptor\": {\"name\": \"JEERA\", \"code\": \"1:456987\", \"symbol\": \"https://storage.googleapis.com/marblex-hp-seller-preprod/imagesProduct-c5817579-2f30-4068-8d2e-eb1f8bdc86b8?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135908&Signature=L8lWdb%2BLYj5%2BN7gnUTfkACWNpbPtTwpJbVQlRNnVWU2i6v6oQuAA22ZBBPdD61yhuLT%2FL%2BKwljLby8%2Fklbs1iLOViLdWOYnU5aAjrDoyE%2Fdb9mEQ5ihvJbaKU383LWY9l%2F3PZ7Qqx2TFlpOnUwI5KcLEulham87G%2FUwpnBQf5XLwuoE4n%2BKV5Fhw7F6yXoA8UvgByzVSTlN2UxzF4TpewNnUp%2B%2BzeZ3MdrZzNlh%2BP78i2ULrLc5cjx%2B9boO2z47bY%2FiNGZKjlF0SG26Ylwy2Y8%2BvZhIROKP34CTLW1UMw5jenumWfXkv3wn1zRAxU2Ybtl0bokRd9Q0fUuSkHqOd7w%3D%3D\", \"short_desc\": \"JEERA\", \"long_desc\": \"JEERA\", \"images\": [\"https://storage.googleapis.com/marblex-hp-seller-preprod/imagesProduct-c5817579-2f30-4068-8d2e-eb1f8bdc86b8?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135908&Signature=L8lWdb%2BLYj5%2BN7gnUTfkACWNpbPtTwpJbVQlRNnVWU2i6v6oQuAA22ZBBPdD61yhuLT%2FL%2BKwljLby8%2Fklbs1iLOViLdWOYnU5aAjrDoyE%2Fdb9mEQ5ihvJbaKU383LWY9l%2F3PZ7Qqx2TFlpOnUwI5KcLEulham87G%2FUwpnBQf5XLwuoE4n%2BKV5Fhw7F6yXoA8UvgByzVSTlN2UxzF4TpewNnUp%2B%2BzeZ3MdrZzNlh%2BP78i2ULrLc5cjx%2B9boO2z47bY%2FiNGZKjlF0SG26Ylwy2Y8%2BvZhIROKP34CTLW1UMw5jenumWfXkv3wn1zRAxU2Ybtl0bokRd9Q0fUuSkHqOd7w%3D%3D\"]}, \"quantity\": {\"unitized\": {\"measure\": {\"unit\": \"unit\", \"value\": \"12\"}}, \"available\": {\"count\": \"0\"}, \"maximum\": {\"count\": \"20\"}}, \"price\": {\"currency\": \"INR\", \"value\": 120, \"maximum_value\": \"200\"}, \"category_ids\": [], \"category_id\": \"Masala & Seasoning\", \"location_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"fulfillment_id\": \"1\", \"@ondc/org/returnable\": true, \"@ondc/org/cancellable\": true, \"@ondc/org/available_on_cod\": false, \"@ondc/org/time_to_ship\": \"P0D\", \"@ondc/org/seller_pickup_return\": true, \"@ondc/org/return_window\": \"PT24H\", \"@ondc/org/contact_details_consumer_care\": \"Himira Store,pawarnaman11@gmail.com,9816012233\", \"@ondc/org/statutory_reqs_packaged_commodities\": {\"manufacturer_or_packer_name\": \"HimIra\", \"manufacturer_or_packer_address\": \"himira\", \"common_or_generic_name_of_commodity\": \"himira\", \"month_year_of_manufacture_packing_import\": \"09/2025\"}, \"@ondc/org/statutory_reqs_prepackaged_food\": {\"nutritional_info\": \"NA\", \"additives_info\": \"NA\", \"brand_owner_FSSAI_license_no\": \"NA\", \"other_FSSAI_license_no\": \"NA\", \"importer_FSSAI_license_no\": \"NA\"}, \"tags\": [{\"code\": \"origin\", \"list\": [{\"code\": \"country\", \"value\": \"IND\"}]}, {\"code\": \"type\", \"list\": [{\"code\": \"type\", \"value\": \"item\"}]}, {\"code\": \"image\", \"list\": [{\"code\": \"type\", \"value\": \"back_image\"}, {\"code\": \"url\", \"value\": \"https://storage.googleapis.com/marblex-hp-seller-preprod/backImageProduct-b79dd9a2-7c71-423b-a336-86ef9ccd13f6?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135912&Signature=WGlCuBHN8gXE5BfY2xKUfHtkaRCnp88OzpJ3mrCb7iupWveSvcKPkBJws0wvCGRecjGBRARSeEwqlyEQ2jrj%2BDdlv5Cn7QH97y7goWP9mKFGwQ9QS1Y5eHTLC%2BpbGyHzwrwK1iRZdeS9GuXDZPcdEisZTqgWDQWa1VMQqCQnsA4NACUohTxiPsQ2NnoM4rdmMUFmlFkSyqSIwMBIjuN5COTQv8Zgr2Qnhr%2B%2FGvrxBriiibsYx9BOJaCtJx1SUzS9lvVtZyMYnJWTrao8ZsnQcJjD7rKtDk%2BULIoywZ0nadqWku1%2B7PRvILbPAnF6NG1YQ7GzH%2FrUyCFqwIXy6BVdyw%3D%3D\"}]}, {\"code\": \"veg_nonveg\", \"list\": [{\"code\": \"veg\", \"value\": \"yes\"}]}], \"slug\": \"JEERA-7571d9\"}, \"provider_details\": {\"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"descriptor\": {\"name\": \"Himira Store\", \"symbol\": \"https://storage.googleapis.com/hp-seller-preprod/logo?GoogleAccessId=hp-ondc-sa%40hp-gov.iam.gserviceaccount.com&Expires=2104115225&Signature=6Q7Ulph%2BOoO4%2FNOb0VGC3tJF%2FfMe9jCfIh%2FvBUiiIFtzG3BzI%2BY%2BBdCgQaeqaxWg%2B3%2FCCm6%2Bt15nFHEVpkNl6ZkL9Uu%2BgYJJVzCRAXCCtrG6loG6xf1kZZuy7Ml8JL1JSId8EuQED5dEM1BKAtjTWIxMj7p4tIg5ngARQs%2FkCFQZrwFGOKXajUURDed1Y2MUz1L4gCeKZetlniWM53kIX8J5BQU2ZCTPJ7yLW0tYFLnZto9wNuwVdMTjM%2BseEESkrEiAB1zsDfpeC6IEWTpiPMF2%2B3tJFDQd%2BxcBq6ZMqUm7l8x5gZgaiX7pIi7C4m7lGp3r%2FBuPPwveDmBF%2BZhGXQ%3D%3D\", \"short_desc\": \"Himira Store\", \"long_desc\": \"Himira Store\", \"images\": [\"https://storage.googleapis.com/hp-seller-preprod/logo?GoogleAccessId=hp-ondc-sa%40hp-gov.iam.gserviceaccount.com&Expires=2104115225&Signature=6Q7Ulph%2BOoO4%2FNOb0VGC3tJF%2FfMe9jCfIh%2FvBUiiIFtzG3BzI%2BY%2BBdCgQaeqaxWg%2B3%2FCCm6%2Bt15nFHEVpkNl6ZkL9Uu%2BgYJJVzCRAXCCtrG6loG6xf1kZZuy7Ml8JL1JSId8EuQED5dEM1BKAtjTWIxMj7p4tIg5ngARQs%2FkCFQZrwFGOKXajUURDed1Y2MUz1L4gCeKZetlniWM53kIX8J5BQU2ZCTPJ7yLW0tYFLnZto9wNuwVdMTjM%2BseEESkrEiAB1zsDfpeC6IEWTpiPMF2%2B3tJFDQd%2BxcBq6ZMqUm7l8x5gZgaiX7pIi7C4m7lGp3r%2FBuPPwveDmBF%2BZhGXQ%3D%3D\"]}, \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-13T14:03:21.328Z\"}, \"@ondc/org/fssai_license_no\": \"12345678901234\", \"ttl\": \"PT24H\", \"fulfillments\": [{\"id\": \"1\", \"type\": \"Delivery\", \"contact\": {\"email\": \"naman.pawar@thewitslab.com\", \"phone\": \"7505390422\"}}], \"tags\": [{\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Tea and Coffee\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Pickles and Chutney\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Tinned and Processed Food\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Salt, Sugar and Jaggery\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Masala & Seasoning\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Oil & Ghee\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"timing\", \"list\": [{\"code\": \"type\", \"value\": \"All\"}, {\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"day_from\", \"value\": \"1\"}, {\"code\": \"day_to\", \"value\": \"7\"}, {\"code\": \"time_from\", \"value\": \"0000\"}, {\"code\": \"time_to\", \"value\": \"2359\"}]}], \"local_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"slug\": \"Himira-Store-4c6840\"}, \"location_details\": {\"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"gps\": \"0,0\", \"address\": {\"city\": \"Mohali\", \"state\": \"Punjab\", \"area_code\": \"140301\", \"street\": \"Eco Floors 1\", \"locality\": \"Sector 125\"}, \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-13T14:03:21.328Z\", \"days\": \"1,2,3,4,5,6,7\", \"schedule\": {\"holidays\": [\"2027-10-23\"]}, \"range\": {\"start\": \"0000\", \"end\": \"2359\"}}, \"circle\": {\"gps\": \"0,0\", \"radius\": {\"unit\": \"km\", \"value\": \"3\"}}, \"local_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, \"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_de91d866-77e1-4e60-a255-82bbc30631c6\", \"name\": \"JEERA\", \"description\": \"JEERA\", \"long_description\": \"JEERA\", \"price\": {\"currency\": \"INR\", \"value\": 120, \"maximum_value\": \"200\"}, \"currency\": \"INR\", \"images\": [\"https://storage.googleapis.com/marblex-hp-seller-preprod/imagesProduct-c5817579-2f30-4068-8d2e-eb1f8bdc86b8?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135908&Signature=L8lWdb%2BLYj5%2BN7gnUTfkACWNpbPtTwpJbVQlRNnVWU2i6v6oQuAA22ZBBPdD61yhuLT%2FL%2BKwljLby8%2Fklbs1iLOViLdWOYnU5aAjrDoyE%2Fdb9mEQ5ihvJbaKU383LWY9l%2F3PZ7Qqx2TFlpOnUwI5KcLEulham87G%2FUwpnBQf5XLwuoE4n%2BKV5Fhw7F6yXoA8UvgByzVSTlN2UxzF4TpewNnUp%2B%2BzeZ3MdrZzNlh%2BP78i2ULrLc5cjx%2B9boO2z47bY%2FiNGZKjlF0SG26Ylwy2Y8%2BvZhIROKP34CTLW1UMw5jenumWfXkv3wn1zRAxU2Ybtl0bokRd9Q0fUuSkHqOd7w%3D%3D\"], \"category\": \"Masala & Seasoning\", \"provider_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"provider_name\": \"Himira Store\", \"provider_location\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"returnable\": true, \"cod_available\": false, \"available\": true}], \"total_results\": 1, \"search_type\": \"hybrid (mongodb+vector)\", \"page\": 1, \"page_size\": 10}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Found 1 products...\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"stage\": \"tool_results\"}\n\ndata: {\"type\": \"tool_complete\", \"tool_name\": \"search_products\", \"message\": \"Completed search_products in 1656ms\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"timestamp\": \"2025-10-16T08:07:28.015233\", \"execution_time_ms\": 1656.3084125518799, \"success\": true}\n\ndata: {\"type\": \"raw_products\", \"tool_name\": \"search_products\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"raw_data\": true, \"biap_specifications\": true, \"timestamp\": \"2025-10-16T08:07:28.018440\", \"products\": [{\"item_details\": {\"id\": \"de91d866-77e1-4e60-a255-82bbc30631c6\", \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-10T07:25:40.219Z\"}, \"parent_item_id\": \"\", \"descriptor\": {\"name\": \"JEERA\", \"code\": \"1:456987\", \"symbol\": \"https://storage.googleapis.com/marblex-hp-seller-preprod/imagesProduct-c5817579-2f30-4068-8d2e-eb1f8bdc86b8?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135908&Signature=L8lWdb%2BLYj5%2BN7gnUTfkACWNpbPtTwpJbVQlRNnVWU2i6v6oQuAA22ZBBPdD61yhuLT%2FL%2BKwljLby8%2Fklbs1iLOViLdWOYnU5aAjrDoyE%2Fdb9mEQ5ihvJbaKU383LWY9l%2F3PZ7Qqx2TFlpOnUwI5KcLEulham87G%2FUwpnBQf5XLwuoE4n%2BKV5Fhw7F6yXoA8UvgByzVSTlN2UxzF4TpewNnUp%2B%2BzeZ3MdrZzNlh%2BP78i2ULrLc5cjx%2B9boO2z47bY%2FiNGZKjlF0SG26Ylwy2Y8%2BvZhIROKP34CTLW1UMw5jenumWfXkv3wn1zRAxU2Ybtl0bokRd9Q0fUuSkHqOd7w%3D%3D\", \"short_desc\": \"JEERA\", \"long_desc\": \"JEERA\", \"images\": [\"https://storage.googleapis.com/marblex-hp-seller-preprod/imagesProduct-c5817579-2f30-4068-8d2e-eb1f8bdc86b8?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135908&Signature=L8lWdb%2BLYj5%2BN7gnUTfkACWNpbPtTwpJbVQlRNnVWU2i6v6oQuAA22ZBBPdD61yhuLT%2FL%2BKwljLby8%2Fklbs1iLOViLdWOYnU5aAjrDoyE%2Fdb9mEQ5ihvJbaKU383LWY9l%2F3PZ7Qqx2TFlpOnUwI5KcLEulham87G%2FUwpnBQf5XLwuoE4n%2BKV5Fhw7F6yXoA8UvgByzVSTlN2UxzF4TpewNnUp%2B%2BzeZ3MdrZzNlh%2BP78i2ULrLc5cjx%2B9boO2z47bY%2FiNGZKjlF0SG26Ylwy2Y8%2BvZhIROKP34CTLW1UMw5jenumWfXkv3wn1zRAxU2Ybtl0bokRd9Q0fUuSkHqOd7w%3D%3D\"]}, \"quantity\": {\"unitized\": {\"measure\": {\"unit\": \"unit\", \"value\": \"12\"}}, \"available\": {\"count\": \"0\"}, \"maximum\": {\"count\": \"20\"}}, \"price\": {\"currency\": \"INR\", \"value\": 120, \"maximum_value\": \"200\"}, \"category_ids\": [], \"category_id\": \"Masala & Seasoning\", \"location_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"fulfillment_id\": \"1\", \"@ondc/org/returnable\": true, \"@ondc/org/cancellable\": true, \"@ondc/org/available_on_cod\": false, \"@ondc/org/time_to_ship\": \"P0D\", \"@ondc/org/seller_pickup_return\": true, \"@ondc/org/return_window\": \"PT24H\", \"@ondc/org/contact_details_consumer_care\": \"Himira Store,pawarnaman11@gmail.com,9816012233\", \"@ondc/org/statutory_reqs_packaged_commodities\": {\"manufacturer_or_packer_name\": \"HimIra\", \"manufacturer_or_packer_address\": \"himira\", \"common_or_generic_name_of_commodity\": \"himira\", \"month_year_of_manufacture_packing_import\": \"09/2025\"}, \"@ondc/org/statutory_reqs_prepackaged_food\": {\"nutritional_info\": \"NA\", \"additives_info\": \"NA\", \"brand_owner_FSSAI_license_no\": \"NA\", \"other_FSSAI_license_no\": \"NA\", \"importer_FSSAI_license_no\": \"NA\"}, \"tags\": [{\"code\": \"origin\", \"list\": [{\"code\": \"country\", \"value\": \"IND\"}]}, {\"code\": \"type\", \"list\": [{\"code\": \"type\", \"value\": \"item\"}]}, {\"code\": \"image\", \"list\": [{\"code\": \"type\", \"value\": \"back_image\"}, {\"code\": \"url\", \"value\": \"https://storage.googleapis.com/marblex-hp-seller-preprod/backImageProduct-b79dd9a2-7c71-423b-a336-86ef9ccd13f6?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135912&Signature=WGlCuBHN8gXE5BfY2xKUfHtkaRCnp88OzpJ3mrCb7iupWveSvcKPkBJws0wvCGRecjGBRARSeEwqlyEQ2jrj%2BDdlv5Cn7QH97y7goWP9mKFGwQ9QS1Y5eHTLC%2BpbGyHzwrwK1iRZdeS9GuXDZPcdEisZTqgWDQWa1VMQqCQnsA4NACUohTxiPsQ2NnoM4rdmMUFmlFkSyqSIwMBIjuN5COTQv8Zgr2Qnhr%2B%2FGvrxBriiibsYx9BOJaCtJx1SUzS9lvVtZyMYnJWTrao8ZsnQcJjD7rKtDk%2BULIoywZ0nadqWku1%2B7PRvILbPAnF6NG1YQ7GzH%2FrUyCFqwIXy6BVdyw%3D%3D\"}]}, {\"code\": \"veg_nonveg\", \"list\": [{\"code\": \"veg\", \"value\": \"yes\"}]}], \"slug\": \"JEERA-7571d9\"}, \"provider_details\": {\"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"descriptor\": {\"name\": \"Himira Store\", \"symbol\": \"https://storage.googleapis.com/hp-seller-preprod/logo?GoogleAccessId=hp-ondc-sa%40hp-gov.iam.gserviceaccount.com&Expires=2104115225&Signature=6Q7Ulph%2BOoO4%2FNOb0VGC3tJF%2FfMe9jCfIh%2FvBUiiIFtzG3BzI%2BY%2BBdCgQaeqaxWg%2B3%2FCCm6%2Bt15nFHEVpkNl6ZkL9Uu%2BgYJJVzCRAXCCtrG6loG6xf1kZZuy7Ml8JL1JSId8EuQED5dEM1BKAtjTWIxMj7p4tIg5ngARQs%2FkCFQZrwFGOKXajUURDed1Y2MUz1L4gCeKZetlniWM53kIX8J5BQU2ZCTPJ7yLW0tYFLnZto9wNuwVdMTjM%2BseEESkrEiAB1zsDfpeC6IEWTpiPMF2%2B3tJFDQd%2BxcBq6ZMqUm7l8x5gZgaiX7pIi7C4m7lGp3r%2FBuPPwveDmBF%2BZhGXQ%3D%3D\", \"short_desc\": \"Himira Store\", \"long_desc\": \"Himira Store\", \"images\": [\"https://storage.googleapis.com/hp-seller-preprod/logo?GoogleAccessId=hp-ondc-sa%40hp-gov.iam.gserviceaccount.com&Expires=2104115225&Signature=6Q7Ulph%2BOoO4%2FNOb0VGC3tJF%2FfMe9jCfIh%2FvBUiiIFtzG3BzI%2BY%2BBdCgQaeqaxWg%2B3%2FCCm6%2Bt15nFHEVpkNl6ZkL9Uu%2BgYJJVzCRAXCCtrG6loG6xf1kZZuy7Ml8JL1JSId8EuQED5dEM1BKAtjTWIxMj7p4tIg5ngARQs%2FkCFQZrwFGOKXajUURDed1Y2MUz1L4gCeKZetlniWM53kIX8J5BQU2ZCTPJ7yLW0tYFLnZto9wNuwVdMTjM%2BseEESkrEiAB1zsDfpeC6IEWTpiPMF2%2B3tJFDQd%2BxcBq6ZMqUm7l8x5gZgaiX7pIi7C4m7lGp3r%2FBuPPwveDmBF%2BZhGXQ%3D%3D\"]}, \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-13T14:03:21.328Z\"}, \"@ondc/org/fssai_license_no\": \"12345678901234\", \"ttl\": \"PT24H\", \"fulfillments\": [{\"id\": \"1\", \"type\": \"Delivery\", \"contact\": {\"email\": \"naman.pawar@thewitslab.com\", \"phone\": \"7505390422\"}}], \"tags\": [{\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Tea and Coffee\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Pickles and Chutney\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Tinned and Processed Food\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Salt, Sugar and Jaggery\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Masala & Seasoning\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Oil & Ghee\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"timing\", \"list\": [{\"code\": \"type\", \"value\": \"All\"}, {\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"day_from\", \"value\": \"1\"}, {\"code\": \"day_to\", \"value\": \"7\"}, {\"code\": \"time_from\", \"value\": \"0000\"}, {\"code\": \"time_to\", \"value\": \"2359\"}]}], \"local_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"slug\": \"Himira-Store-4c6840\"}, \"location_details\": {\"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"gps\": \"0,0\", \"address\": {\"city\": \"Mohali\", \"state\": \"Punjab\", \"area_code\": \"140301\", \"street\": \"Eco Floors 1\", \"locality\": \"Sector 125\"}, \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-13T14:03:21.328Z\", \"days\": \"1,2,3,4,5,6,7\", \"schedule\": {\"holidays\": [\"2027-10-23\"]}, \"range\": {\"start\": \"0000\", \"end\": \"2359\"}}, \"circle\": {\"gps\": \"0,0\", \"radius\": {\"unit\": \"km\", \"value\": \"3\"}}, \"local_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, \"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_de91d866-77e1-4e60-a255-82bbc30631c6\", \"name\": \"JEERA\", \"description\": \"JEERA\", \"long_description\": \"JEERA\", \"price\": {\"currency\": \"INR\", \"value\": 120, \"maximum_value\": \"200\"}, \"currency\": \"INR\", \"images\": [\"https://storage.googleapis.com/marblex-hp-seller-preprod/imagesProduct-c5817579-2f30-4068-8d2e-eb1f8bdc86b8?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135908&Signature=L8lWdb%2BLYj5%2BN7gnUTfkACWNpbPtTwpJbVQlRNnVWU2i6v6oQuAA22ZBBPdD61yhuLT%2FL%2BKwljLby8%2Fklbs1iLOViLdWOYnU5aAjrDoyE%2Fdb9mEQ5ihvJbaKU383LWY9l%2F3PZ7Qqx2TFlpOnUwI5KcLEulham87G%2FUwpnBQf5XLwuoE4n%2BKV5Fhw7F6yXoA8UvgByzVSTlN2UxzF4TpewNnUp%2B%2BzeZ3MdrZzNlh%2BP78i2ULrLc5cjx%2B9boO2z47bY%2FiNGZKjlF0SG26Ylwy2Y8%2BvZhIROKP34CTLW1UMw5jenumWfXkv3wn1zRAxU2Ybtl0bokRd9Q0fUuSkHqOd7w%3D%3D\"], \"category\": \"Masala & Seasoning\", \"provider_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"provider_name\": \"Himira Store\", \"provider_location\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"returnable\": true, \"cod_available\": false, \"available\": true}], \"total_results\": 1, \"search_type\": \"hybrid (mongodb+vector)\", \"page\": 1, \"page_size\": 10}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Found 1 products...\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"stage\": \"tool_results\"}\n\ndata: {\"type\": \"tool_start\", \"tool_name\": \"add_to_cart\", \"message\": \"Executing add_to_cart...\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"timestamp\": \"2025-10-16T08:07:31.911745\", \"execution_time_ms\": null, \"success\": null}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Executing add_to_cart...\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"stage\": \"tool_execution\"}\n\ndata: {\"type\": \"raw_cart\", \"tool_name\": \"add_to_cart\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"raw_data\": true, \"biap_specifications\": true, \"timestamp\": \"2025-10-16T08:07:33.286073\", \"cart_items\": [{\"_id\": \"68f0a7c46d6f329fa5e0f585\", \"item_type\": null, \"cart\": \"68f0a6a46d6f329fa5e0f548\", \"item_id\": \"de91d866-77e1-4e60-a255-82bbc30631c6\", \"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_de91d866-77e1-4e60-a255-82bbc30631c6\", \"provider_id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"count\": 1, \"customisations\": null, \"hasCustomisations\": false, \"createdAt\": \"2025-10-16T08:07:32.984Z\", \"updatedAt\": \"2025-10-16T08:07:32.984Z\", \"__v\": 0, \"item\": {\"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_de91d866-77e1-4e60-a255-82bbc30631c6\", \"local_id\": \"de91d866-77e1-4e60-a255-82bbc30631c6\", \"bpp_id\": \"hp-seller-preprod.himira.co.in\", \"bpp_uri\": \"https://hp-seller-preprod.himira.co.in/api/v2\", \"domain\": \"ONDC:RET10\", \"tags\": [{\"code\": \"origin\", \"list\": [{\"code\": \"country\", \"value\": \"IND\"}]}, {\"code\": \"type\", \"list\": [{\"code\": \"type\", \"value\": \"item\"}]}, {\"code\": \"image\", \"list\": [{\"code\": \"type\", \"value\": \"back_image\"}, {\"code\": \"url\", \"value\": \"https://storage.googleapis.com/marblex-hp-seller-preprod/backImageProduct-b79dd9a2-7c71-423b-a336-86ef9ccd13f6?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135912&Signature=WGlCuBHN8gXE5BfY2xKUfHtkaRCnp88OzpJ3mrCb7iupWveSvcKPkBJws0wvCGRecjGBRARSeEwqlyEQ2jrj%2BDdlv5Cn7QH97y7goWP9mKFGwQ9QS1Y5eHTLC%2BpbGyHzwrwK1iRZdeS9GuXDZPcdEisZTqgWDQWa1VMQqCQnsA4NACUohTxiPsQ2NnoM4rdmMUFmlFkSyqSIwMBIjuN5COTQv8Zgr2Qnhr%2B%2FGvrxBriiibsYx9BOJaCtJx1SUzS9lvVtZyMYnJWTrao8ZsnQcJjD7rKtDk%2BULIoywZ0nadqWku1%2B7PRvILbPAnF6NG1YQ7GzH%2FrUyCFqwIXy6BVdyw%3D%3D\"}]}, {\"code\": \"veg_nonveg\", \"list\": [{\"code\": \"veg\", \"value\": \"yes\"}]}], \"contextCity\": \"std:0172\", \"quantity\": {\"count\": 1}, \"provider\": {\"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"descriptor\": {\"name\": \"Himira Store\", \"symbol\": \"https://storage.googleapis.com/hp-seller-preprod/logo?GoogleAccessId=hp-ondc-sa%40hp-gov.iam.gserviceaccount.com&Expires=2104115225&Signature=6Q7Ulph%2BOoO4%2FNOb0VGC3tJF%2FfMe9jCfIh%2FvBUiiIFtzG3BzI%2BY%2BBdCgQaeqaxWg%2B3%2FCCm6%2Bt15nFHEVpkNl6ZkL9Uu%2BgYJJVzCRAXCCtrG6loG6xf1kZZuy7Ml8JL1JSId8EuQED5dEM1BKAtjTWIxMj7p4tIg5ngARQs%2FkCFQZrwFGOKXajUURDed1Y2MUz1L4gCeKZetlniWM53kIX8J5BQU2ZCTPJ7yLW0tYFLnZto9wNuwVdMTjM%2BseEESkrEiAB1zsDfpeC6IEWTpiPMF2%2B3tJFDQd%2BxcBq6ZMqUm7l8x5gZgaiX7pIi7C4m7lGp3r%2FBuPPwveDmBF%2BZhGXQ%3D%3D\", \"short_desc\": \"Himira Store\", \"long_desc\": \"Himira Store\", \"images\": [\"https://storage.googleapis.com/hp-seller-preprod/logo?GoogleAccessId=hp-ondc-sa%40hp-gov.iam.gserviceaccount.com&Expires=2104115225&Signature=6Q7Ulph%2BOoO4%2FNOb0VGC3tJF%2FfMe9jCfIh%2FvBUiiIFtzG3BzI%2BY%2BBdCgQaeqaxWg%2B3%2FCCm6%2Bt15nFHEVpkNl6ZkL9Uu%2BgYJJVzCRAXCCtrG6loG6xf1kZZuy7Ml8JL1JSId8EuQED5dEM1BKAtjTWIxMj7p4tIg5ngARQs%2FkCFQZrwFGOKXajUURDed1Y2MUz1L4gCeKZetlniWM53kIX8J5BQU2ZCTPJ7yLW0tYFLnZto9wNuwVdMTjM%2BseEESkrEiAB1zsDfpeC6IEWTpiPMF2%2B3tJFDQd%2BxcBq6ZMqUm7l8x5gZgaiX7pIi7C4m7lGp3r%2FBuPPwveDmBF%2BZhGXQ%3D%3D\"]}, \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-13T14:03:21.328Z\"}, \"@ondc/org/fssai_license_no\": \"12345678901234\", \"ttl\": \"PT24H\", \"fulfillments\": [{\"id\": \"1\", \"type\": \"Delivery\", \"contact\": {\"email\": \"naman.pawar@thewitslab.com\", \"phone\": \"7505390422\"}}], \"tags\": [{\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Tea and Coffee\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Pickles and Chutney\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Tinned and Processed Food\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Salt, Sugar and Jaggery\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Masala & Seasoning\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Oil & Ghee\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"timing\", \"list\": [{\"code\": \"type\", \"value\": \"All\"}, {\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"day_from\", \"value\": \"1\"}, {\"code\": \"day_to\", \"value\": \"7\"}, {\"code\": \"time_from\", \"value\": \"0000\"}, {\"code\": \"time_to\", \"value\": \"2359\"}]}], \"local_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"slug\": \"Himira-Store-4c6840\", \"locations\": [{\"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"gps\": \"0,0\", \"address\": {\"city\": \"Mohali\", \"state\": \"Punjab\", \"area_code\": \"140301\", \"street\": \"Eco Floors 1\", \"locality\": \"Sector 125\"}, \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-13T14:03:21.328Z\", \"days\": \"1,2,3,4,5,6,7\", \"schedule\": {\"holidays\": [\"2027-10-23\"]}, \"range\": {\"start\": \"0000\", \"end\": \"2359\"}}, \"circle\": {\"gps\": \"0,0\", \"radius\": {\"unit\": \"km\", \"value\": \"3\"}}, \"local_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}]}, \"product\": {\"id\": \"de91d866-77e1-4e60-a255-82bbc30631c6\", \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-10T07:25:40.219Z\"}, \"parent_item_id\": \"\", \"descriptor\": {\"name\": \"JEERA\", \"code\": \"1:456987\", \"symbol\": \"https://storage.googleapis.com/marblex-hp-seller-preprod/imagesProduct-c5817579-2f30-4068-8d2e-eb1f8bdc86b8?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135908&Signature=L8lWdb%2BLYj5%2BN7gnUTfkACWNpbPtTwpJbVQlRNnVWU2i6v6oQuAA22ZBBPdD61yhuLT%2FL%2BKwljLby8%2Fklbs1iLOViLdWOYnU5aAjrDoyE%2Fdb9mEQ5ihvJbaKU383LWY9l%2F3PZ7Qqx2TFlpOnUwI5KcLEulham87G%2FUwpnBQf5XLwuoE4n%2BKV5Fhw7F6yXoA8UvgByzVSTlN2UxzF4TpewNnUp%2B%2BzeZ3MdrZzNlh%2BP78i2ULrLc5cjx%2B9boO2z47bY%2FiNGZKjlF0SG26Ylwy2Y8%2BvZhIROKP34CTLW1UMw5jenumWfXkv3wn1zRAxU2Ybtl0bokRd9Q0fUuSkHqOd7w%3D%3D\", \"short_desc\": \"JEERA\", \"long_desc\": \"JEERA\", \"images\": [\"https://storage.googleapis.com/marblex-hp-seller-preprod/imagesProduct-c5817579-2f30-4068-8d2e-eb1f8bdc86b8?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135908&Signature=L8lWdb%2BLYj5%2BN7gnUTfkACWNpbPtTwpJbVQlRNnVWU2i6v6oQuAA22ZBBPdD61yhuLT%2FL%2BKwljLby8%2Fklbs1iLOViLdWOYnU5aAjrDoyE%2Fdb9mEQ5ihvJbaKU383LWY9l%2F3PZ7Qqx2TFlpOnUwI5KcLEulham87G%2FUwpnBQf5XLwuoE4n%2BKV5Fhw7F6yXoA8UvgByzVSTlN2UxzF4TpewNnUp%2B%2BzeZ3MdrZzNlh%2BP78i2ULrLc5cjx%2B9boO2z47bY%2FiNGZKjlF0SG26Ylwy2Y8%2BvZhIROKP34CTLW1UMw5jenumWfXkv3wn1zRAxU2Ybtl0bokRd9Q0fUuSkHqOd7w%3D%3D\"]}, \"quantity\": {\"unitized\": {\"measure\": {\"unit\": \"unit\", \"value\": \"12\"}}, \"available\": {\"count\": \"0\"}, \"maximum\": {\"count\": \"20\"}}, \"price\": {\"currency\": \"INR\", \"value\": 120, \"maximum_value\": \"200\"}, \"category_ids\": [], \"category_id\": \"Masala & Seasoning\", \"location_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"fulfillment_id\": \"1\", \"@ondc/org/returnable\": true, \"@ondc/org/cancellable\": true, \"@ondc/org/available_on_cod\": false, \"@ondc/org/time_to_ship\": \"P0D\", \"@ondc/org/seller_pickup_return\": true, \"@ondc/org/return_window\": \"PT24H\", \"@ondc/org/contact_details_consumer_care\": \"Himira Store,pawarnaman11@gmail.com,9816012233\", \"@ondc/org/statutory_reqs_packaged_commodities\": {\"manufacturer_or_packer_name\": \"HimIra\", \"manufacturer_or_packer_address\": \"himira\", \"common_or_generic_name_of_commodity\": \"himira\", \"month_year_of_manufacture_packing_import\": \"09/2025\"}, \"@ondc/org/statutory_reqs_prepackaged_food\": {\"nutritional_info\": \"NA\", \"additives_info\": \"NA\", \"brand_owner_FSSAI_license_no\": \"NA\", \"other_FSSAI_license_no\": \"NA\", \"importer_FSSAI_license_no\": \"NA\"}, \"tags\": [{\"code\": \"origin\", \"list\": [{\"code\": \"country\", \"value\": \"IND\"}]}, {\"code\": \"type\", \"list\": [{\"code\": \"type\", \"value\": \"item\"}]}, {\"code\": \"image\", \"list\": [{\"code\": \"type\", \"value\": \"back_image\"}, {\"code\": \"url\", \"value\": \"https://storage.googleapis.com/marblex-hp-seller-preprod/backImageProduct-b79dd9a2-7c71-423b-a336-86ef9ccd13f6?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135912&Signature=WGlCuBHN8gXE5BfY2xKUfHtkaRCnp88OzpJ3mrCb7iupWveSvcKPkBJws0wvCGRecjGBRARSeEwqlyEQ2jrj%2BDdlv5Cn7QH97y7goWP9mKFGwQ9QS1Y5eHTLC%2BpbGyHzwrwK1iRZdeS9GuXDZPcdEisZTqgWDQWa1VMQqCQnsA4NACUohTxiPsQ2NnoM4rdmMUFmlFkSyqSIwMBIjuN5COTQv8Zgr2Qnhr%2B%2FGvrxBriiibsYx9BOJaCtJx1SUzS9lvVtZyMYnJWTrao8ZsnQcJjD7rKtDk%2BULIoywZ0nadqWku1%2B7PRvILbPAnF6NG1YQ7GzH%2FrUyCFqwIXy6BVdyw%3D%3D\"}]}, {\"code\": \"veg_nonveg\", \"list\": [{\"code\": \"veg\", \"value\": \"yes\"}]}], \"slug\": \"JEERA-7571d9\", \"subtotal\": 120}, \"userId\": \"\", \"deviceId\": \"\", \"customisationState\": {}, \"customisations\": null, \"hasCustomisations\": false, \"attributes\": {}, \"related_items\": 0}}], \"cart_summary\": {\"total_items\": 1, \"total_value\": 120.0, \"is_empty\": false, \"items_count\": 1}}\n\ndata: {\"type\": \"tool_complete\", \"tool_name\": \"add_to_cart\", \"message\": \"Completed add_to_cart in 1377ms\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"timestamp\": \"2025-10-16T08:07:33.289508\", \"execution_time_ms\": 1377.3386478424072, \"success\": true}\n\ndata: {\"type\": \"tool_start\", \"tool_name\": \"view_cart\", \"message\": \"Executing view_cart...\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"timestamp\": \"2025-10-16T08:07:38.827568\", \"execution_time_ms\": null, \"success\": null}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Executing view_cart...\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"stage\": \"tool_execution\"}\n\ndata: {\"type\": \"raw_cart\", \"tool_name\": \"view_cart\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"raw_data\": true, \"biap_specifications\": true, \"timestamp\": \"2025-10-16T08:07:39.226880\", \"cart_items\": [{\"_id\": \"68f0a7c46d6f329fa5e0f585\", \"item_type\": null, \"cart\": \"68f0a6a46d6f329fa5e0f548\", \"item_id\": \"de91d866-77e1-4e60-a255-82bbc30631c6\", \"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_de91d866-77e1-4e60-a255-82bbc30631c6\", \"provider_id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"count\": 1, \"customisations\": null, \"hasCustomisations\": false, \"createdAt\": \"2025-10-16T08:07:32.984Z\", \"updatedAt\": \"2025-10-16T08:07:32.984Z\", \"__v\": 0, \"item\": {\"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_de91d866-77e1-4e60-a255-82bbc30631c6\", \"local_id\": \"de91d866-77e1-4e60-a255-82bbc30631c6\", \"bpp_id\": \"hp-seller-preprod.himira.co.in\", \"bpp_uri\": \"https://hp-seller-preprod.himira.co.in/api/v2\", \"domain\": \"ONDC:RET10\", \"tags\": [{\"code\": \"origin\", \"list\": [{\"code\": \"country\", \"value\": \"IND\"}]}, {\"code\": \"type\", \"list\": [{\"code\": \"type\", \"value\": \"item\"}]}, {\"code\": \"image\", \"list\": [{\"code\": \"type\", \"value\": \"back_image\"}, {\"code\": \"url\", \"value\": \"https://storage.googleapis.com/marblex-hp-seller-preprod/backImageProduct-b79dd9a2-7c71-423b-a336-86ef9ccd13f6?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135912&Signature=WGlCuBHN8gXE5BfY2xKUfHtkaRCnp88OzpJ3mrCb7iupWveSvcKPkBJws0wvCGRecjGBRARSeEwqlyEQ2jrj%2BDdlv5Cn7QH97y7goWP9mKFGwQ9QS1Y5eHTLC%2BpbGyHzwrwK1iRZdeS9GuXDZPcdEisZTqgWDQWa1VMQqCQnsA4NACUohTxiPsQ2NnoM4rdmMUFmlFkSyqSIwMBIjuN5COTQv8Zgr2Qnhr%2B%2FGvrxBriiibsYx9BOJaCtJx1SUzS9lvVtZyMYnJWTrao8ZsnQcJjD7rKtDk%2BULIoywZ0nadqWku1%2B7PRvILbPAnF6NG1YQ7GzH%2FrUyCFqwIXy6BVdyw%3D%3D\"}]}, {\"code\": \"veg_nonveg\", \"list\": [{\"code\": \"veg\", \"value\": \"yes\"}]}], \"contextCity\": \"std:0172\", \"quantity\": {\"count\": 1}, \"provider\": {\"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"descriptor\": {\"name\": \"Himira Store\", \"symbol\": \"https://storage.googleapis.com/hp-seller-preprod/logo?GoogleAccessId=hp-ondc-sa%40hp-gov.iam.gserviceaccount.com&Expires=2104115225&Signature=6Q7Ulph%2BOoO4%2FNOb0VGC3tJF%2FfMe9jCfIh%2FvBUiiIFtzG3BzI%2BY%2BBdCgQaeqaxWg%2B3%2FCCm6%2Bt15nFHEVpkNl6ZkL9Uu%2BgYJJVzCRAXCCtrG6loG6xf1kZZuy7Ml8JL1JSId8EuQED5dEM1BKAtjTWIxMj7p4tIg5ngARQs%2FkCFQZrwFGOKXajUURDed1Y2MUz1L4gCeKZetlniWM53kIX8J5BQU2ZCTPJ7yLW0tYFLnZto9wNuwVdMTjM%2BseEESkrEiAB1zsDfpeC6IEWTpiPMF2%2B3tJFDQd%2BxcBq6ZMqUm7l8x5gZgaiX7pIi7C4m7lGp3r%2FBuPPwveDmBF%2BZhGXQ%3D%3D\", \"short_desc\": \"Himira Store\", \"long_desc\": \"Himira Store\", \"images\": [\"https://storage.googleapis.com/hp-seller-preprod/logo?GoogleAccessId=hp-ondc-sa%40hp-gov.iam.gserviceaccount.com&Expires=2104115225&Signature=6Q7Ulph%2BOoO4%2FNOb0VGC3tJF%2FfMe9jCfIh%2FvBUiiIFtzG3BzI%2BY%2BBdCgQaeqaxWg%2B3%2FCCm6%2Bt15nFHEVpkNl6ZkL9Uu%2BgYJJVzCRAXCCtrG6loG6xf1kZZuy7Ml8JL1JSId8EuQED5dEM1BKAtjTWIxMj7p4tIg5ngARQs%2FkCFQZrwFGOKXajUURDed1Y2MUz1L4gCeKZetlniWM53kIX8J5BQU2ZCTPJ7yLW0tYFLnZto9wNuwVdMTjM%2BseEESkrEiAB1zsDfpeC6IEWTpiPMF2%2B3tJFDQd%2BxcBq6ZMqUm7l8x5gZgaiX7pIi7C4m7lGp3r%2FBuPPwveDmBF%2BZhGXQ%3D%3D\"]}, \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-13T14:03:21.328Z\"}, \"@ondc/org/fssai_license_no\": \"12345678901234\", \"ttl\": \"PT24H\", \"fulfillments\": [{\"id\": \"1\", \"type\": \"Delivery\", \"contact\": {\"email\": \"naman.pawar@thewitslab.com\", \"phone\": \"7505390422\"}}], \"tags\": [{\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Tea and Coffee\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Pickles and Chutney\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Tinned and Processed Food\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Salt, Sugar and Jaggery\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Masala & Seasoning\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Oil & Ghee\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"timing\", \"list\": [{\"code\": \"type\", \"value\": \"All\"}, {\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"day_from\", \"value\": \"1\"}, {\"code\": \"day_to\", \"value\": \"7\"}, {\"code\": \"time_from\", \"value\": \"0000\"}, {\"code\": \"time_to\", \"value\": \"2359\"}]}], \"local_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"slug\": \"Himira-Store-4c6840\", \"locations\": [{\"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"gps\": \"0,0\", \"address\": {\"city\": \"Mohali\", \"state\": \"Punjab\", \"area_code\": \"140301\", \"street\": \"Eco Floors 1\", \"locality\": \"Sector 125\"}, \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-13T14:03:21.328Z\", \"days\": \"1,2,3,4,5,6,7\", \"schedule\": {\"holidays\": [\"2027-10-23\"]}, \"range\": {\"start\": \"0000\", \"end\": \"2359\"}}, \"circle\": {\"gps\": \"0,0\", \"radius\": {\"unit\": \"km\", \"value\": \"3\"}}, \"local_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}]}, \"product\": {\"id\": \"de91d866-77e1-4e60-a255-82bbc30631c6\", \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-10T07:25:40.219Z\"}, \"parent_item_id\": \"\", \"descriptor\": {\"name\": \"JEERA\", \"code\": \"1:456987\", \"symbol\": \"https://storage.googleapis.com/marblex-hp-seller-preprod/imagesProduct-c5817579-2f30-4068-8d2e-eb1f8bdc86b8?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135908&Signature=L8lWdb%2BLYj5%2BN7gnUTfkACWNpbPtTwpJbVQlRNnVWU2i6v6oQuAA22ZBBPdD61yhuLT%2FL%2BKwljLby8%2Fklbs1iLOViLdWOYnU5aAjrDoyE%2Fdb9mEQ5ihvJbaKU383LWY9l%2F3PZ7Qqx2TFlpOnUwI5KcLEulham87G%2FUwpnBQf5XLwuoE4n%2BKV5Fhw7F6yXoA8UvgByzVSTlN2UxzF4TpewNnUp%2B%2BzeZ3MdrZzNlh%2BP78i2ULrLc5cjx%2B9boO2z47bY%2FiNGZKjlF0SG26Ylwy2Y8%2BvZhIROKP34CTLW1UMw5jenumWfXkv3wn1zRAxU2Ybtl0bokRd9Q0fUuSkHqOd7w%3D%3D\", \"short_desc\": \"JEERA\", \"long_desc\": \"JEERA\", \"images\": [\"https://storage.googleapis.com/marblex-hp-seller-preprod/imagesProduct-c5817579-2f30-4068-8d2e-eb1f8bdc86b8?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135908&Signature=L8lWdb%2BLYj5%2BN7gnUTfkACWNpbPtTwpJbVQlRNnVWU2i6v6oQuAA22ZBBPdD61yhuLT%2FL%2BKwljLby8%2Fklbs1iLOViLdWOYnU5aAjrDoyE%2Fdb9mEQ5ihvJbaKU383LWY9l%2F3PZ7Qqx2TFlpOnUwI5KcLEulham87G%2FUwpnBQf5XLwuoE4n%2BKV5Fhw7F6yXoA8UvgByzVSTlN2UxzF4TpewNnUp%2B%2BzeZ3MdrZzNlh%2BP78i2ULrLc5cjx%2B9boO2z47bY%2FiNGZKjlF0SG26Ylwy2Y8%2BvZhIROKP34CTLW1UMw5jenumWfXkv3wn1zRAxU2Ybtl0bokRd9Q0fUuSkHqOd7w%3D%3D\"]}, \"quantity\": {\"unitized\": {\"measure\": {\"unit\": \"unit\", \"value\": \"12\"}}, \"available\": {\"count\": \"0\"}, \"maximum\": {\"count\": \"20\"}}, \"price\": {\"currency\": \"INR\", \"value\": 120, \"maximum_value\": \"200\"}, \"category_ids\": [], \"category_id\": \"Masala & Seasoning\", \"location_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"fulfillment_id\": \"1\", \"@ondc/org/returnable\": true, \"@ondc/org/cancellable\": true, \"@ondc/org/available_on_cod\": false, \"@ondc/org/time_to_ship\": \"P0D\", \"@ondc/org/seller_pickup_return\": true, \"@ondc/org/return_window\": \"PT24H\", \"@ondc/org/contact_details_consumer_care\": \"Himira Store,pawarnaman11@gmail.com,9816012233\", \"@ondc/org/statutory_reqs_packaged_commodities\": {\"manufacturer_or_packer_name\": \"HimIra\", \"manufacturer_or_packer_address\": \"himira\", \"common_or_generic_name_of_commodity\": \"himira\", \"month_year_of_manufacture_packing_import\": \"09/2025\"}, \"@ondc/org/statutory_reqs_prepackaged_food\": {\"nutritional_info\": \"NA\", \"additives_info\": \"NA\", \"brand_owner_FSSAI_license_no\": \"NA\", \"other_FSSAI_license_no\": \"NA\", \"importer_FSSAI_license_no\": \"NA\"}, \"tags\": [{\"code\": \"origin\", \"list\": [{\"code\": \"country\", \"value\": \"IND\"}]}, {\"code\": \"type\", \"list\": [{\"code\": \"type\", \"value\": \"item\"}]}, {\"code\": \"image\", \"list\": [{\"code\": \"type\", \"value\": \"back_image\"}, {\"code\": \"url\", \"value\": \"https://storage.googleapis.com/marblex-hp-seller-preprod/backImageProduct-b79dd9a2-7c71-423b-a336-86ef9ccd13f6?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135912&Signature=WGlCuBHN8gXE5BfY2xKUfHtkaRCnp88OzpJ3mrCb7iupWveSvcKPkBJws0wvCGRecjGBRARSeEwqlyEQ2jrj%2BDdlv5Cn7QH97y7goWP9mKFGwQ9QS1Y5eHTLC%2BpbGyHzwrwK1iRZdeS9GuXDZPcdEisZTqgWDQWa1VMQqCQnsA4NACUohTxiPsQ2NnoM4rdmMUFmlFkSyqSIwMBIjuN5COTQv8Zgr2Qnhr%2B%2FGvrxBriiibsYx9BOJaCtJx1SUzS9lvVtZyMYnJWTrao8ZsnQcJjD7rKtDk%2BULIoywZ0nadqWku1%2B7PRvILbPAnF6NG1YQ7GzH%2FrUyCFqwIXy6BVdyw%3D%3D\"}]}, {\"code\": \"veg_nonveg\", \"list\": [{\"code\": \"veg\", \"value\": \"yes\"}]}], \"slug\": \"JEERA-7571d9\", \"subtotal\": 120}, \"userId\": \"\", \"deviceId\": \"\", \"customisationState\": {}, \"customisations\": null, \"hasCustomisations\": false, \"attributes\": {}, \"related_items\": 0}}], \"cart_summary\": {\"total_items\": 1, \"total_value\": 120.0, \"is_empty\": false, \"items_count\": 1}}\n\ndata: {\"type\": \"tool_complete\", \"tool_name\": \"view_cart\", \"message\": \"Completed view_cart in 403ms\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"timestamp\": \"2025-10-16T08:07:39.230726\", \"execution_time_ms\": 402.51731872558594, \"success\": true}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Perfect! I found great options and added the best one to your cart.\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"stage\": \"completion\"}\n\ndata: {\"type\": \"response\", \"content\": \"I've added 1 unit of JEERA to your cart from Himira Store for \\u20b9120.00. However, it appears that this item might be out of stock. Also, 1 unit might not be sufficient for making jeera rice for 50 people. Please let me know if you'd like to search for an alternative or adjust the quantity, though it might not be available.\", \"session_id\": \"session_bdbba6ccef6446dd9c2fc18926eca997\", \"timestamp\": \"2025-10-16T08:07:45.127643\", \"complete\": true}\n\ndata: [DONE]\n\n"
+				}
+			]
+		},
+		{
+			"name": "4. View Cart (SSE)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"SSE Cart view successful\", function () {",
+							"    pm.response.to.have.status(200);",
+							"    const responseText = pm.response.text();",
+							"    ",
+							"    // Validate SSE cart view",
+							"    pm.expect(responseText).to.include('thinking');",
+							"    pm.expect(responseText).to.include('cart_update');",
+							"    pm.expect(responseText).to.include('response');",
+							"    pm.expect(responseText).to.include('[DONE]');",
+							"    ",
+							"    console.log('👀 SSE Cart View received');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Accept",
+						"value": "text/event-stream"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"message\": \"show me my cart\",\n  \"session_id\": \"{{SESSION_ID}}\"\n}"
+				},
+				"url": "{{BASE_URL}}/api/v1/chat/stream",
+				"description": "View current cart contents via SSE streaming. Expected events:\n- thinking: Agent retrieving cart data\n- cart_update: Complete cart information\n- response: Cart summary with items and total\n- [DONE]: Stream completion"
+			},
+			"response": [
+				{
+					"name": "4. View Cart (SSE)",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "text/event-stream"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"view cart\",\n  \"session_id\": \"{{SESSION_ID}}\"\n}"
+						},
+						"url": "{{BASE_URL}}/api/v1/chat/stream"
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "",
+					"header": [
+						{
+							"key": "date",
+							"value": "Thu, 16 Oct 2025 08:15:28 GMT"
+						},
+						{
+							"key": "server",
+							"value": "uvicorn"
+						},
+						{
+							"key": "content-type",
+							"value": "text/event-stream; charset=utf-8"
+						},
+						{
+							"key": "Transfer-Encoding",
+							"value": "chunked"
+						}
+					],
+					"cookie": [],
+					"body": "data: {\"type\": \"thinking\", \"message\": \"Analyzing your request...\", \"timestamp\": \"2025-10-16T08:15:28.861188\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\"}\n\ndata: {\"type\": \"thinking\", \"message\": \"Understanding your request...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\"}\n\ndata: {\"type\": \"thinking\", \"message\": \"Processing with available tools...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\"}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Let me help you with that...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"stage\": \"initial\"}\n\ndata: {\"type\": \"tool_start\", \"tool_name\": \"view_cart\", \"message\": \"Executing view_cart...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:15:32.772592\", \"execution_time_ms\": null, \"success\": null}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Executing view_cart...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"stage\": \"tool_execution\"}\n\ndata: {\"type\": \"raw_cart\", \"tool_name\": \"view_cart\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"raw_data\": true, \"biap_specifications\": true, \"timestamp\": \"2025-10-16T08:15:33.063645\", \"cart_items\": [{\"_id\": \"68f0a7c46d6f329fa5e0f585\", \"item_type\": null, \"cart\": \"68f0a6a46d6f329fa5e0f548\", \"item_id\": \"de91d866-77e1-4e60-a255-82bbc30631c6\", \"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_de91d866-77e1-4e60-a255-82bbc30631c6\", \"provider_id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"count\": 1, \"customisations\": null, \"hasCustomisations\": false, \"createdAt\": \"2025-10-16T08:07:32.984Z\", \"updatedAt\": \"2025-10-16T08:07:32.984Z\", \"__v\": 0, \"item\": {\"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_de91d866-77e1-4e60-a255-82bbc30631c6\", \"local_id\": \"de91d866-77e1-4e60-a255-82bbc30631c6\", \"bpp_id\": \"hp-seller-preprod.himira.co.in\", \"bpp_uri\": \"https://hp-seller-preprod.himira.co.in/api/v2\", \"domain\": \"ONDC:RET10\", \"tags\": [{\"code\": \"origin\", \"list\": [{\"code\": \"country\", \"value\": \"IND\"}]}, {\"code\": \"type\", \"list\": [{\"code\": \"type\", \"value\": \"item\"}]}, {\"code\": \"image\", \"list\": [{\"code\": \"type\", \"value\": \"back_image\"}, {\"code\": \"url\", \"value\": \"https://storage.googleapis.com/marblex-hp-seller-preprod/backImageProduct-b79dd9a2-7c71-423b-a336-86ef9ccd13f6?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135912&Signature=WGlCuBHN8gXE5BfY2xKUfHtkaRCnp88OzpJ3mrCb7iupWveSvcKPkBJws0wvCGRecjGBRARSeEwqlyEQ2jrj%2BDdlv5Cn7QH97y7goWP9mKFGwQ9QS1Y5eHTLC%2BpbGyHzwrwK1iRZdeS9GuXDZPcdEisZTqgWDQWa1VMQqCQnsA4NACUohTxiPsQ2NnoM4rdmMUFmlFkSyqSIwMBIjuN5COTQv8Zgr2Qnhr%2B%2FGvrxBriiibsYx9BOJaCtJx1SUzS9lvVtZyMYnJWTrao8ZsnQcJjD7rKtDk%2BULIoywZ0nadqWku1%2B7PRvILbPAnF6NG1YQ7GzH%2FrUyCFqwIXy6BVdyw%3D%3D\"}]}, {\"code\": \"veg_nonveg\", \"list\": [{\"code\": \"veg\", \"value\": \"yes\"}]}], \"contextCity\": \"std:0172\", \"quantity\": {\"count\": 1}, \"provider\": {\"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"descriptor\": {\"name\": \"Himira Store\", \"symbol\": \"https://storage.googleapis.com/hp-seller-preprod/logo?GoogleAccessId=hp-ondc-sa%40hp-gov.iam.gserviceaccount.com&Expires=2104115225&Signature=6Q7Ulph%2BOoO4%2FNOb0VGC3tJF%2FfMe9jCfIh%2FvBUiiIFtzG3BzI%2BY%2BBdCgQaeqaxWg%2B3%2FCCm6%2Bt15nFHEVpkNl6ZkL9Uu%2BgYJJVzCRAXCCtrG6loG6xf1kZZuy7Ml8JL1JSId8EuQED5dEM1BKAtjTWIxMj7p4tIg5ngARQs%2FkCFQZrwFGOKXajUURDed1Y2MUz1L4gCeKZetlniWM53kIX8J5BQU2ZCTPJ7yLW0tYFLnZto9wNuwVdMTjM%2BseEESkrEiAB1zsDfpeC6IEWTpiPMF2%2B3tJFDQd%2BxcBq6ZMqUm7l8x5gZgaiX7pIi7C4m7lGp3r%2FBuPPwveDmBF%2BZhGXQ%3D%3D\", \"short_desc\": \"Himira Store\", \"long_desc\": \"Himira Store\", \"images\": [\"https://storage.googleapis.com/hp-seller-preprod/logo?GoogleAccessId=hp-ondc-sa%40hp-gov.iam.gserviceaccount.com&Expires=2104115225&Signature=6Q7Ulph%2BOoO4%2FNOb0VGC3tJF%2FfMe9jCfIh%2FvBUiiIFtzG3BzI%2BY%2BBdCgQaeqaxWg%2B3%2FCCm6%2Bt15nFHEVpkNl6ZkL9Uu%2BgYJJVzCRAXCCtrG6loG6xf1kZZuy7Ml8JL1JSId8EuQED5dEM1BKAtjTWIxMj7p4tIg5ngARQs%2FkCFQZrwFGOKXajUURDed1Y2MUz1L4gCeKZetlniWM53kIX8J5BQU2ZCTPJ7yLW0tYFLnZto9wNuwVdMTjM%2BseEESkrEiAB1zsDfpeC6IEWTpiPMF2%2B3tJFDQd%2BxcBq6ZMqUm7l8x5gZgaiX7pIi7C4m7lGp3r%2FBuPPwveDmBF%2BZhGXQ%3D%3D\"]}, \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-13T14:03:21.328Z\"}, \"@ondc/org/fssai_license_no\": \"12345678901234\", \"ttl\": \"PT24H\", \"fulfillments\": [{\"id\": \"1\", \"type\": \"Delivery\", \"contact\": {\"email\": \"naman.pawar@thewitslab.com\", \"phone\": \"7505390422\"}}], \"tags\": [{\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Tea and Coffee\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Pickles and Chutney\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Tinned and Processed Food\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Salt, Sugar and Jaggery\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Masala & Seasoning\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"serviceability\", \"list\": [{\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"category\", \"value\": \"Oil & Ghee\"}, {\"code\": \"type\", \"value\": \"12\"}, {\"code\": \"unit\", \"value\": \"country\"}, {\"code\": \"val\", \"value\": \"IND\"}]}, {\"code\": \"timing\", \"list\": [{\"code\": \"type\", \"value\": \"All\"}, {\"code\": \"location\", \"value\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}, {\"code\": \"day_from\", \"value\": \"1\"}, {\"code\": \"day_to\", \"value\": \"7\"}, {\"code\": \"time_from\", \"value\": \"0000\"}, {\"code\": \"time_to\", \"value\": \"2359\"}]}], \"local_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"slug\": \"Himira-Store-4c6840\", \"locations\": [{\"id\": \"hp-seller-preprod.himira.co.in_ONDC:RET10_d871c2ae-bf3f-4d3c-963f-f85f94848e8c_d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"gps\": \"0,0\", \"address\": {\"city\": \"Mohali\", \"state\": \"Punjab\", \"area_code\": \"140301\", \"street\": \"Eco Floors 1\", \"locality\": \"Sector 125\"}, \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-13T14:03:21.328Z\", \"days\": \"1,2,3,4,5,6,7\", \"schedule\": {\"holidays\": [\"2027-10-23\"]}, \"range\": {\"start\": \"0000\", \"end\": \"2359\"}}, \"circle\": {\"gps\": \"0,0\", \"radius\": {\"unit\": \"km\", \"value\": \"3\"}}, \"local_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\"}]}, \"product\": {\"id\": \"de91d866-77e1-4e60-a255-82bbc30631c6\", \"time\": {\"label\": \"enable\", \"timestamp\": \"2025-10-10T07:25:40.219Z\"}, \"parent_item_id\": \"\", \"descriptor\": {\"name\": \"JEERA\", \"code\": \"1:456987\", \"symbol\": \"https://storage.googleapis.com/marblex-hp-seller-preprod/imagesProduct-c5817579-2f30-4068-8d2e-eb1f8bdc86b8?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135908&Signature=L8lWdb%2BLYj5%2BN7gnUTfkACWNpbPtTwpJbVQlRNnVWU2i6v6oQuAA22ZBBPdD61yhuLT%2FL%2BKwljLby8%2Fklbs1iLOViLdWOYnU5aAjrDoyE%2Fdb9mEQ5ihvJbaKU383LWY9l%2F3PZ7Qqx2TFlpOnUwI5KcLEulham87G%2FUwpnBQf5XLwuoE4n%2BKV5Fhw7F6yXoA8UvgByzVSTlN2UxzF4TpewNnUp%2B%2BzeZ3MdrZzNlh%2BP78i2ULrLc5cjx%2B9boO2z47bY%2FiNGZKjlF0SG26Ylwy2Y8%2BvZhIROKP34CTLW1UMw5jenumWfXkv3wn1zRAxU2Ybtl0bokRd9Q0fUuSkHqOd7w%3D%3D\", \"short_desc\": \"JEERA\", \"long_desc\": \"JEERA\", \"images\": [\"https://storage.googleapis.com/marblex-hp-seller-preprod/imagesProduct-c5817579-2f30-4068-8d2e-eb1f8bdc86b8?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135908&Signature=L8lWdb%2BLYj5%2BN7gnUTfkACWNpbPtTwpJbVQlRNnVWU2i6v6oQuAA22ZBBPdD61yhuLT%2FL%2BKwljLby8%2Fklbs1iLOViLdWOYnU5aAjrDoyE%2Fdb9mEQ5ihvJbaKU383LWY9l%2F3PZ7Qqx2TFlpOnUwI5KcLEulham87G%2FUwpnBQf5XLwuoE4n%2BKV5Fhw7F6yXoA8UvgByzVSTlN2UxzF4TpewNnUp%2B%2BzeZ3MdrZzNlh%2BP78i2ULrLc5cjx%2B9boO2z47bY%2FiNGZKjlF0SG26Ylwy2Y8%2BvZhIROKP34CTLW1UMw5jenumWfXkv3wn1zRAxU2Ybtl0bokRd9Q0fUuSkHqOd7w%3D%3D\"]}, \"quantity\": {\"unitized\": {\"measure\": {\"unit\": \"unit\", \"value\": \"12\"}}, \"available\": {\"count\": \"0\"}, \"maximum\": {\"count\": \"20\"}}, \"price\": {\"currency\": \"INR\", \"value\": 120, \"maximum_value\": \"200\"}, \"category_ids\": [], \"category_id\": \"Masala & Seasoning\", \"location_id\": \"d871c2ae-bf3f-4d3c-963f-f85f94848e8c\", \"fulfillment_id\": \"1\", \"@ondc/org/returnable\": true, \"@ondc/org/cancellable\": true, \"@ondc/org/available_on_cod\": false, \"@ondc/org/time_to_ship\": \"P0D\", \"@ondc/org/seller_pickup_return\": true, \"@ondc/org/return_window\": \"PT24H\", \"@ondc/org/contact_details_consumer_care\": \"Himira Store,pawarnaman11@gmail.com,9816012233\", \"@ondc/org/statutory_reqs_packaged_commodities\": {\"manufacturer_or_packer_name\": \"HimIra\", \"manufacturer_or_packer_address\": \"himira\", \"common_or_generic_name_of_commodity\": \"himira\", \"month_year_of_manufacture_packing_import\": \"09/2025\"}, \"@ondc/org/statutory_reqs_prepackaged_food\": {\"nutritional_info\": \"NA\", \"additives_info\": \"NA\", \"brand_owner_FSSAI_license_no\": \"NA\", \"other_FSSAI_license_no\": \"NA\", \"importer_FSSAI_license_no\": \"NA\"}, \"tags\": [{\"code\": \"origin\", \"list\": [{\"code\": \"country\", \"value\": \"IND\"}]}, {\"code\": \"type\", \"list\": [{\"code\": \"type\", \"value\": \"item\"}]}, {\"code\": \"image\", \"list\": [{\"code\": \"type\", \"value\": \"back_image\"}, {\"code\": \"url\", \"value\": \"https://storage.googleapis.com/marblex-hp-seller-preprod/backImageProduct-b79dd9a2-7c71-423b-a336-86ef9ccd13f6?GoogleAccessId=marblex-hp-preprod-sa%40marblex-hp-preprod.iam.gserviceaccount.com&Expires=2119135912&Signature=WGlCuBHN8gXE5BfY2xKUfHtkaRCnp88OzpJ3mrCb7iupWveSvcKPkBJws0wvCGRecjGBRARSeEwqlyEQ2jrj%2BDdlv5Cn7QH97y7goWP9mKFGwQ9QS1Y5eHTLC%2BpbGyHzwrwK1iRZdeS9GuXDZPcdEisZTqgWDQWa1VMQqCQnsA4NACUohTxiPsQ2NnoM4rdmMUFmlFkSyqSIwMBIjuN5COTQv8Zgr2Qnhr%2B%2FGvrxBriiibsYx9BOJaCtJx1SUzS9lvVtZyMYnJWTrao8ZsnQcJjD7rKtDk%2BULIoywZ0nadqWku1%2B7PRvILbPAnF6NG1YQ7GzH%2FrUyCFqwIXy6BVdyw%3D%3D\"}]}, {\"code\": \"veg_nonveg\", \"list\": [{\"code\": \"veg\", \"value\": \"yes\"}]}], \"slug\": \"JEERA-7571d9\", \"subtotal\": 120}, \"userId\": \"\", \"deviceId\": \"\", \"customisationState\": {}, \"customisations\": null, \"hasCustomisations\": false, \"attributes\": {}, \"related_items\": 0}}], \"cart_summary\": {\"total_items\": 1, \"total_value\": 120.0, \"is_empty\": false, \"items_count\": 1}}\n\ndata: {\"type\": \"tool_complete\", \"tool_name\": \"view_cart\", \"message\": \"Completed view_cart in 294ms\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:15:33.067081\", \"execution_time_ms\": 294.2976951599121, \"success\": true}\n\ndata: {\"type\": \"response\", \"content\": \"Here's what's in your cart:\\n\\n1. **JEERA** (from Himira Store)\\n   \\u20b9120.00 x 1 = \\u20b9120.00\\n   Category: Masala & Seasoning\\n\\n**Total: \\u20b9120.00**\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:15:36.346478\", \"complete\": true}\n\ndata: [DONE]\n\n"
+				}
+			]
+		},
+		{
+			"name": "5. ONDC SELECT - Get Delivery Options (SSE)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"SSE ONDC SELECT successful\", function () {",
+							"    pm.response.to.have.status(200);",
+							"    const responseText = pm.response.text();",
+							"    ",
+							"    // Validate SSE SELECT operation",
+							"    pm.expect(responseText).to.include('thinking');",
+							"    pm.expect(responseText).to.include('tool_start');",
+							"    pm.expect(responseText).to.include('response');",
+							"    pm.expect(responseText).to.include('[DONE]');",
+							"    ",
+							"    // Check for delivery options",
+							"    pm.expect(responseText.toLowerCase()).to.include('delivery');",
+							"    ",
+							"    console.log('📦 SSE ONDC SELECT completed');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Accept",
+						"value": "text/event-stream"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"message\": \"get delivery options for {{DELIVERY_CITY}}, {{DELIVERY_STATE}}, {{DELIVERY_PINCODE}}\",\n  \"session_id\": \"{{SESSION_ID}}\"\n}"
+				},
+				"url": "{{BASE_URL}}/api/v1/chat/stream",
+				"description": "ONDC SELECT operation via SSE streaming. Expected events:\n- thinking: Agent processing delivery request\n- tool_start: SELECT operation begins\n- response: Delivery options and quotes\n- [DONE]: Stream completion"
+			},
+			"response": [
+				{
+					"name": "5. ONDC SELECT - Get Delivery Options (SSE)",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "text/event-stream"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"proceed to checkout\",\n  \"session_id\": \"{{SESSION_ID}}\"\n}"
+						},
+						"url": "{{BASE_URL}}/api/v1/chat/stream"
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "",
+					"header": [
+						{
+							"key": "date",
+							"value": "Thu, 16 Oct 2025 08:16:54 GMT"
+						},
+						{
+							"key": "server",
+							"value": "uvicorn"
+						},
+						{
+							"key": "content-type",
+							"value": "text/event-stream; charset=utf-8"
+						},
+						{
+							"key": "Transfer-Encoding",
+							"value": "chunked"
+						}
+					],
+					"cookie": [],
+					"body": "data: {\"type\": \"thinking\", \"message\": \"Analyzing your request...\", \"timestamp\": \"2025-10-16T08:16:55.339071\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\"}\n\ndata: {\"type\": \"thinking\", \"message\": \"Understanding your request...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\"}\n\ndata: {\"type\": \"thinking\", \"message\": \"Processing with available tools...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\"}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Let me help you with that...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"stage\": \"initial\"}\n\ndata: {\"type\": \"tool_start\", \"tool_name\": \"select_items_for_order\", \"message\": \"Executing select_items_for_order...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:16:58.920189\", \"execution_time_ms\": null, \"success\": null}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Executing select_items_for_order...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"stage\": \"tool_execution\"}\n\ndata: {\"type\": \"tool_complete\", \"tool_name\": \"select_items_for_order\", \"message\": \"Completed select_items_for_order in 1811ms\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:17:00.730732\", \"execution_time_ms\": 1810.8372688293457, \"success\": true}\n\ndata: {\"type\": \"tool_start\", \"tool_name\": \"initialize_order\", \"message\": \"Executing initialize_order...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:17:03.803652\", \"execution_time_ms\": null, \"success\": null}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Executing initialize_order...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"stage\": \"tool_execution\"}\n\ndata: {\"type\": \"tool_complete\", \"tool_name\": \"initialize_order\", \"message\": \"Completed initialize_order in 2717ms\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:17:06.521085\", \"execution_time_ms\": 2717.1690464019775, \"success\": true}\n\ndata: {\"type\": \"tool_start\", \"tool_name\": \"create_payment\", \"message\": \"Executing create_payment...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:17:09.806293\", \"execution_time_ms\": null, \"success\": null}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Executing create_payment...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"stage\": \"tool_execution\"}\n\ndata: {\"type\": \"tool_complete\", \"tool_name\": \"create_payment\", \"message\": \"Completed create_payment in 8ms\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:17:09.813959\", \"execution_time_ms\": 7.777929306030273, \"success\": true}\n\ndata: {\"type\": \"response\", \"content\": \"Your payment of \\u20b9120.0 is pending. Please complete the payment using the provided payment ID `pay_RFWPuAV50T2Qnj`. Once completed, I will verify the payment and confirm your order.\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:17:13.441853\", \"complete\": true}\n\ndata: [DONE]\n\n"
+				}
+			]
+		},
+		{
+			"name": "6. ONDC INIT - Initialize Order (SSE)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"SSE ONDC INIT successful\", function () {",
+							"    pm.response.to.have.status(200);",
+							"    const responseText = pm.response.text();",
+							"    ",
+							"    // Validate SSE INIT operation",
+							"    pm.expect(responseText).to.include('thinking');",
+							"    pm.expect(responseText).to.include('tool_start');",
+							"    pm.expect(responseText).to.include('response');",
+							"    pm.expect(responseText).to.include('[DONE]');",
+							"    ",
+							"    // Check for order initialization",
+							"    pm.expect(responseText.toLowerCase()).to.include('order');",
+							"    ",
+							"    console.log('🏗️ SSE ONDC INIT completed');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Accept",
+						"value": "text/event-stream"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"message\": \"initialize order with delivery to {{CUSTOMER_NAME}}, {{BUILDING}} {{STREET}}, {{LOCALITY}}, {{DELIVERY_CITY}}, {{DELIVERY_STATE}}, {{DELIVERY_PINCODE}}, phone: {{PHONE}}, email: {{EMAIL}}\",\n  \"session_id\": \"{{SESSION_ID}}\"\n}"
+				},
+				"url": "{{BASE_URL}}/api/v1/chat/stream",
+				"description": "ONDC INIT operation via SSE streaming. Expected events:\n- thinking: Agent setting up order details\n- tool_start: INIT operation begins\n- response: Order initialization confirmation\n- [DONE]: Stream completion"
+			},
+			"response": [
+				{
+					"name": "6. ONDC INIT - Initialize Order (SSE)",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "text/event-stream"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"verify_payment with status PAID\",\n  \"session_id\": \"{{SESSION_ID}}\"\n}"
+						},
+						"url": "{{BASE_URL}}/api/v1/chat/stream"
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "",
+					"header": [
+						{
+							"key": "date",
+							"value": "Thu, 16 Oct 2025 08:20:30 GMT"
+						},
+						{
+							"key": "server",
+							"value": "uvicorn"
+						},
+						{
+							"key": "content-type",
+							"value": "text/event-stream; charset=utf-8"
+						},
+						{
+							"key": "Transfer-Encoding",
+							"value": "chunked"
+						}
+					],
+					"cookie": [],
+					"body": "data: {\"type\": \"thinking\", \"message\": \"Analyzing your request...\", \"timestamp\": \"2025-10-16T08:20:31.250174\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\"}\n\ndata: {\"type\": \"thinking\", \"message\": \"Understanding your request...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\"}\n\ndata: {\"type\": \"thinking\", \"message\": \"Processing with available tools...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\"}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Let me help you with that...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"stage\": \"initial\"}\n\ndata: {\"type\": \"tool_start\", \"tool_name\": \"verify_payment\", \"message\": \"Executing verify_payment...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:20:34.870350\", \"execution_time_ms\": null, \"success\": null}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Executing verify_payment...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"stage\": \"tool_execution\"}\n\ndata: {\"type\": \"tool_complete\", \"tool_name\": \"verify_payment\", \"message\": \"Completed verify_payment in 29ms\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:20:34.899200\", \"execution_time_ms\": 29.24633026123047, \"success\": true}\n\ndata: {\"type\": \"tool_start\", \"tool_name\": \"confirm_order\", \"message\": \"Executing confirm_order...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:20:37.672752\", \"execution_time_ms\": null, \"success\": null}\n\ndata: {\"type\": \"conversation_chunk\", \"message\": \"Executing confirm_order...\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"stage\": \"tool_execution\"}\n\ndata: {\"type\": \"tool_complete\", \"tool_name\": \"confirm_order\", \"message\": \"Completed confirm_order in 14ms\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:20:37.687214\", \"execution_time_ms\": 14.22739028930664, \"success\": true}\n\ndata: {\"type\": \"response\", \"content\": \"Payment verified successfully! Your order has been confirmed. Your order ID is `MOCK_ORDER_TXN_FB8C`.\\n\\n**Order Details:**\\n*   **Items:** 1\\n*   **Total:** \\u20b9120.0\\n*   **Delivery Address:** Najafgarh Road, Najafgarh Road, Najafgarh Road, Kharar Tahsil, Punjab, 140301\\n*   **Payment Method:** RAZORPAY\\n*   **Phone:** 8937977939\\n\\nYou can now track your order or continue shopping.\", \"session_id\": \"session_ce8f3c595e0845e5a21230ce51a90112\", \"timestamp\": \"2025-10-16T08:20:40.742429\", \"complete\": true}\n\ndata: [DONE]\n\n"
+				}
+			]
+		},
+		{
+			"name": "9. Test Session Continuity (SSE)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"SSE Session continuity working\", function () {",
+							"    pm.response.to.have.status(200);",
+							"    const responseText = pm.response.text();",
+							"    ",
+							"    // Validate SSE memory recall",
+							"    pm.expect(responseText).to.include('thinking');",
+							"    pm.expect(responseText).to.include('response');",
+							"    pm.expect(responseText).to.include('[DONE]');",
+							"    ",
+							"    // Check for memory of previous actions",
+							"    pm.expect(responseText.toLowerCase()).to.include('turmeric');",
+							"    ",
+							"    console.log('🧠 SSE Session continuity verified - LLM remembers!');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Accept",
+						"value": "text/event-stream"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"message\": \"what did I search for and order today?\",\n  \"session_id\": \"{{SESSION_ID}}\"\n}"
+				},
+				"url": "{{BASE_URL}}/api/v1/chat/stream",
+				"description": "Test conversation memory via SSE streaming. Expected events:\n- thinking: Agent recalling session history\n- response: Summary of previous searches and orders\n- [DONE]: Stream completion\n\nThis tests that LLM conversation memory works across SSE requests."
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Set test timestamp for unique session tracking",
+					"const timestamp = Date.now();",
+					"pm.collectionVariables.set('TEST_TIMESTAMP', timestamp);",
+					"",
+					"console.log('🚀 Starting ONDC MCP SSE Complete Shopping Journey');",
+					"console.log('📅 Test Timestamp:', timestamp);",
+					"console.log('👤 Using User ID:', pm.environment.get('USER_ID'));",
+					"console.log('📱 Using Device ID:', pm.environment.get('DEVICE_ID'));",
+					"console.log('🔗 Base URL:', pm.environment.get('BASE_URL'));"
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "BASE_URL",
+			"value": "http://localhost:8001",
+			"type": "string",
+			"description": {
+				"content": "Base URL for ONDC MCP backend server",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "USER_ID",
+			"value": "EUSJ0ypAJJVdo3gXrUJe4uIBwDB2",
+			"type": "string",
+			"description": {
+				"content": "Himira User ID for authenticated shopping",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "DEVICE_ID",
+			"value": "ed0bda0dd8c167a73721be5bb142dfc9",
+			"type": "string",
+			"description": {
+				"content": "Device ID for session management",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "SESSION_ID",
+			"value": "",
+			"type": "default",
+			"description": {
+				"content": "Session ID extracted from initialization response",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "TEST_TIMESTAMP",
+			"value": "",
+			"type": "default",
+			"description": {
+				"content": "Timestamp for unique test run identification",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "DELIVERY_CITY",
+			"value": "Bangalore",
+			"type": "string",
+			"description": {
+				"content": "Delivery city for ONDC checkout",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "DELIVERY_STATE",
+			"value": "Karnataka",
+			"type": "string",
+			"description": {
+				"content": "Delivery state for ONDC checkout",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "DELIVERY_PINCODE",
+			"value": "560001",
+			"type": "string",
+			"description": {
+				"content": "Delivery pincode for ONDC checkout",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "DELIVERY_GPS",
+			"value": "12.9716, 77.5946",
+			"type": "string",
+			"description": {
+				"content": "GPS coordinates for delivery location",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "CUSTOMER_NAME",
+			"value": "John Doe",
+			"type": "string",
+			"description": {
+				"content": "Customer name for order initialization",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "BUILDING",
+			"value": "123",
+			"type": "string",
+			"description": {
+				"content": "Building number for delivery address",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "STREET",
+			"value": "Main St",
+			"type": "string",
+			"description": {
+				"content": "Street name for delivery address",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "LOCALITY",
+			"value": "Koramangala",
+			"type": "string",
+			"description": {
+				"content": "Locality for delivery address",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "PHONE",
+			"value": "9999999999",
+			"type": "string",
+			"description": {
+				"content": "Customer phone number",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "EMAIL",
+			"value": "john@example.com",
+			"type": "string",
+			"description": {
+				"content": "Customer email address",
+				"type": "text/plain"
+			}
+		},
+		{
+			"key": "PAYMENT_METHOD",
+			"value": "razorpay",
+			"type": "string",
+			"description": {
+				"content": "Payment method for order",
+				"type": "text/plain"
+			}
+		}
+	]
+}
